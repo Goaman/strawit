@@ -21,6 +21,7 @@ import {
   view,
 } from "./store.ts";
 import { PmView } from "./pm.ts";
+import { GameView } from "./game.ts";
 import { confirmDialog, DialogHost, installGlobalErrorHandlers } from "./dialog.ts";
 import { isCollapsed, toggleCollapse } from "./collapse.ts";
 import { createComposer } from "./composer.ts";
@@ -506,7 +507,7 @@ function Conversation() {
 }
 
 function TopNav() {
-  const tab = (id: "agents" | "pm", label: string) => html`
+  const tab = (id: "agents" | "pm" | "game", label: string) => html`
     <button class="tab" classList=${() => ({ active: view() === id })}
       onClick=${() => setView(id)}>${label}</button>
   `;
@@ -514,6 +515,7 @@ function TopNav() {
     <nav class="topnav" data-component="TopNav">
       ${tab("agents", "Agents")}
       ${tab("pm", "Projects")}
+      ${tab("game", "Game")}
     </nav>
   `;
 }
@@ -524,7 +526,9 @@ function App() {
     ${() =>
       view() === "pm"
         ? html`<${PmView} />`
-        : html`<div class="app"><${Sidebar} /><${Conversation} /></div>`}
+        : view() === "game"
+          ? html`<${GameView} />`
+          : html`<div class="app"><${Sidebar} /><${Conversation} /></div>`}
     <${DialogHost} />
   </div>`;
 }

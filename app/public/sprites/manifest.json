@@ -1,0 +1,68 @@
+{
+  "sheets": [
+    {
+      "id": "knight",
+      "file": "/sprites/knight.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    },
+    {
+      "id": "wizard",
+      "file": "/sprites/wizard.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    },
+    {
+      "id": "ranger",
+      "file": "/sprites/ranger.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    },
+    {
+      "id": "robot",
+      "file": "/sprites/robot.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    },
+    {
+      "id": "fox",
+      "file": "/sprites/fox.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    },
+    {
+      "id": "slime",
+      "file": "/sprites/slime.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    },
+    {
+      "id": "bard",
+      "file": "/sprites/bard.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    },
+    {
+      "id": "ninja",
+      "file": "/sprites/ninja.jpg",
+      "frameW": 352,
+      "frameH": 768,
+      "frames": 4,
+      "cols": 4
+    }
+  ]
+}

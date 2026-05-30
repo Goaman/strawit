@@ -15,18 +15,18 @@ import type {
 // Top-level view: the existing agent console, or the local project board.
 // Persisted to localStorage so the active tab survives a page reload.
 const VIEW_KEY = "strawit.view";
-function loadView(): "agents" | "pm" {
+function loadView(): "agents" | "pm" | "game" {
   try {
     const v = localStorage.getItem(VIEW_KEY);
-    if (v === "agents" || v === "pm") return v;
+    if (v === "agents" || v === "pm" || v === "game") return v;
   } catch {
     /* localStorage may be unavailable (private mode, etc.) — fall back */
   }
   return "agents";
 }
-const [view, setViewRaw] = createSignal<"agents" | "pm">(loadView());
+const [view, setViewRaw] = createSignal<"agents" | "pm" | "game">(loadView());
 export { view };
-export function setView(v: "agents" | "pm") {
+export function setView(v: "agents" | "pm" | "game") {
   try {
     localStorage.setItem(VIEW_KEY, v);
   } catch {

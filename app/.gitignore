@@ -2,3 +2,8 @@ node_modules/
 public/client.js
 .playwright-mcp/
 *.png
+
+# keep generated game sprites (committed assets)
+!public/sprites/
+!public/sprites/*.png
+!public/sprites/*.jpg

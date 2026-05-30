@@ -489,3 +489,28 @@ button.danger:hover { border-color: #ff7a8a; }
   box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
 }
 @keyframes dialog-pop { from { opacity: 0; transform: translateY(6px) scale(.98); } }
+
+/* ---- game ---- */
+.game-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden;
+  background: radial-gradient(circle at 50% 30%, #11151f, var(--bg)); }
+.game-canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; image-rendering: pixelated; cursor: pointer; }
+.game-hud { position: absolute; top: 10px; left: 10px; display: flex; flex-direction: column;
+  gap: 6px; padding: 8px 10px; background: rgba(20, 24, 33, .78); border: 1px solid var(--border);
+  border-radius: var(--radius); font-size: 11.5px; color: var(--text); pointer-events: none;
+  backdrop-filter: blur(3px); }
+.game-hud .stat { display: flex; gap: 6px; align-items: center; }
+.game-hud .stat .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, .25); }
+.game-hud .stat .dot.on { background: #5fd38b; }
+.game-hud .stat .conn { color: var(--dim); }
+.game-hud .counts { gap: 10px; flex-wrap: wrap; color: var(--dim); }
+.game-hud .counts .c-run { color: var(--accent); }
+.game-hud .counts .c-idle { color: var(--dim); }
+.game-hud .counts .c-err { color: #e0556b; }
+.game-hud .counts .c-sub { color: var(--accent2); }
+.game-hud .legend { display: flex; gap: 10px; flex-wrap: wrap; color: var(--dim); }
+.game-hud .legend .li { display: flex; gap: 4px; align-items: center; }
+.game-hud .swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.game-hint { position: absolute; bottom: 8px; right: 12px; color: var(--dim);
+  font-size: 11px; pointer-events: none; }

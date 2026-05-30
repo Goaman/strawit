@@ -19,6 +19,11 @@ app/public/client.js
 .playwright-mcp/
 *.png
 
+# keep generated game sprites (committed assets)
+!app/public/sprites/
+!app/public/sprites/*.png
+!app/public/sprites/*.jpg
+
 # local project board (per-worktree)
 .pm-data.json
 

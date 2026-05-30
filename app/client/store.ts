@@ -13,7 +13,27 @@ import type {
 } from "../types.ts";
 
 // Top-level view: the existing agent console, or the local project board.
-export const [view, setView] = createSignal<"agents" | "pm">("agents");
+// Persisted to localStorage so the active tab survives a page reload.
+const VIEW_KEY = "strawit.view";
+function loadView(): "agents" | "pm" {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === "agents" || v === "pm") return v;
+  } catch {
+    /* localStorage may be unavailable (private mode, etc.) — fall back */
+  }
+  return "agents";
+}
+const [view, setViewRaw] = createSignal<"agents" | "pm">(loadView());
+export { view };
+export function setView(v: "agents" | "pm") {
+  try {
+    localStorage.setItem(VIEW_KEY, v);
+  } catch {
+    /* ignore persistence failures */
+  }
+  return setViewRaw(v);
+}
 
 export const [sessions, setSessions] = createSignal<SessionSnapshot[]>([]);
 

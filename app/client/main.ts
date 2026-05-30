@@ -23,54 +23,9 @@ import {
 import { PmView } from "./pm.ts";
 import { confirmDialog, DialogHost, installGlobalErrorHandlers } from "./dialog.ts";
 import { isCollapsed, toggleCollapse } from "./collapse.ts";
-import { createImagePicker, type PickedImage } from "./images.ts";
+import { createComposer } from "./composer.ts";
 import { renderMarkdown } from "./markdown.ts";
 import type { Project, SessionSnapshot, SubAgentNode, Task, TranscriptEntry } from "../types.ts";
-
-// Shared bits of the image-attachment UI, reused by the composer and the
-// new-agent form. `picker` comes from createImagePicker().
-type Picker = ReturnType<typeof createImagePicker>;
-
-// A "📎" button that opens a (hidden) multi-image file chooser.
-function AttachButton(picker: Picker) {
-  let fileEl!: HTMLInputElement;
-  return html`
-    <span class="attach">
-      <input type="file" accept="image/*" multiple class="attach-input"
-        ref=${(el: HTMLInputElement) => (fileEl = el)}
-        onChange=${(e: Event) => {
-          const input = e.currentTarget as HTMLInputElement;
-          if (input.files) void picker.addFiles(input.files);
-          input.value = ""; // allow re-picking the same file
-        }} />
-      <button type="button" class="attach-btn" title="Attach image(s)"
-        onClick=${() => fileEl.click()}>📎</button>
-    </span>
-  `;
-}
-
-// A strip of thumbnails for the currently-attached images, each removable.
-function AttachStrip(picker: Picker) {
-  // Return a reactive accessor (not a root-less `html\`${...}\`` template):
-  // solid-js/html can't compile a template whose root is a bare expression
-  // (it emits `_$el = .firstChild` → SyntaxError), and a function child is
-  // inserted reactively by the parent template all the same.
-  return () =>
-    picker.images().length
-      ? html`<div class="attach-strip">
-          ${() =>
-            picker.images().map(
-              (img: PickedImage) => html`
-                <div class="thumb" title=${img.name}>
-                  <img src=${img.url} alt=${img.name} />
-                  <button type="button" class="thumb-x" title="Remove"
-                    onClick=${() => picker.remove(img.id)}>✕</button>
-                </div>
-              `,
-            )}
-        </div>`
-      : "";
-}
 
 // Recursive lineage of nested agents spawned via super_agent. Clicking a node
 // focuses that sub-agent's conversation. Rebuilt whole whenever the session's
@@ -124,7 +79,7 @@ function SubAgentDetail(
   sessionAcc: () => SessionSnapshot | undefined,
 ) {
   return html`
-    <div class="sub-detail">
+    <div class="sub-detail" data-component="SubAgentDetail">
       <header class="conv-head">
         <div>
           <button class="back"
@@ -188,11 +143,15 @@ function Sidebar() {
   const [showForm, setShowForm] = createSignal(false);
   // Every session must belong to a task; this drives the (required) task picker.
   const [taskId, setTaskId] = createSignal<string>("");
-  const picker = createImagePicker();
-  let promptEl!: HTMLTextAreaElement;
   let labelEl!: HTMLInputElement;
   let modelEl!: HTMLSelectElement;
   let cwdEl!: HTMLInputElement;
+  // Rich composer for the first message: text + image/element widgets + "/" menu.
+  const composer = createComposer({
+    rows: 4,
+    placeholder: "e.g. List the files here and tell me what this project does. ( / for commands )",
+    onSubmit: () => launch(),
+  });
 
   // Load the board (projects + tasks) so the picker has options. Cheap; re-runs
   // whenever the form is opened so freshly-added tasks show up.
@@ -213,8 +172,8 @@ function Sidebar() {
   };
 
   const launch = () => {
-    const prompt = promptEl.value.trim();
-    const images = picker.payload();
+    const prompt = composer.composeMessage().trim();
+    const images = composer.payloadImages();
     if (!prompt && !images.length) return;
     // A task is optional: if none is picked the server auto-creates one so the
     // session is still tracked on the board.
@@ -226,15 +185,14 @@ function Sidebar() {
       cwd: cwdEl.value.trim() || undefined,
       taskId: taskId(),
     });
-    promptEl.value = "";
+    composer.clear();
     labelEl.value = "";
     setTaskId("");
-    picker.clear();
     setShowForm(false);
   };
 
   return html`
-    <aside class="sidebar">
+    <aside class="sidebar" data-component="Sidebar">
       <div class="brand">
         <span class="dot" classList=${() => ({ on: connected() })}></span>
         <strong>Agent Console</strong>
@@ -248,7 +206,7 @@ function Sidebar() {
       ${() =>
         showForm() &&
         html`
-          <div class="form">
+          <div class="form" data-component="NewAgentForm">
             <label>task (optional)</label>
             <select onChange=${(e: Event) => onPickTask((e.target as HTMLSelectElement).value)}>
               <option value="" selected=${() => !taskId()}>— none (auto-create a task) —</option>
@@ -269,11 +227,7 @@ function Sidebar() {
                 ? html`<span class="hint">No tasks yet — leave this as "none" and one will be created for you.</span>`
                 : ""}
             <label>task / first message</label>
-            <textarea ref=${(el: HTMLTextAreaElement) => (promptEl = el)} rows="4"
-              placeholder="e.g. List the files here and tell me what this project does."
-              onPaste=${(e: ClipboardEvent) => picker.addFromClipboard(e.clipboardData)}></textarea>
-            ${AttachStrip(picker)}
-            <div class="form-attach">${AttachButton(picker)}<span class="hint">attach or paste image(s)</span></div>
+            ${composer.node}
             <label>label (optional)</label>
             <input ref=${(el: HTMLInputElement) => (labelEl = el)} placeholder="my agent" />
             <label>model</label>
@@ -297,7 +251,8 @@ function Sidebar() {
             : sessions().map((s: SessionSnapshot) => {
                 const sid = `side:${s.id}`;
                 return html`
-                  <div class="item" classList=${() => ({ active: s.id === selectedId() })}
+                  <div class="item" data-component="SessionItem"
+                    classList=${() => ({ active: s.id === selectedId() })}
                     onClick=${() => selectSession(s.id)}>
                     <div class="item-top">
                       <span class="name">${s.label}</span>
@@ -345,7 +300,7 @@ function Entry(props: { e: TranscriptEntry }) {
           ? "agent"
           : e.kind;
   return html`
-    <div class="entry ${e.kind}">
+    <div class="entry ${e.kind}" data-component="TranscriptEntry">
       <span class="who">${head}</span>
       ${e.images && e.images.length
         ? html`<div class="entry-images">
@@ -366,8 +321,17 @@ function Entry(props: { e: TranscriptEntry }) {
 
 function Conversation() {
   let scroller!: HTMLDivElement;
-  let composer!: HTMLTextAreaElement;
-  const picker = createImagePicker();
+  // Rich composer: text + element/image widgets + "/" command menu. Created once
+  // here so the input (and any in-progress draft) survives transcript updates.
+  const composer = createComposer({
+    rows: 2,
+    placeholder: () =>
+      selected()?.live
+        ? "Message this agent (⌘/Ctrl+Enter to send, / for commands)…"
+        : "Send to resume this conversation (⌘/Ctrl+Enter, / for commands)…",
+    submitLabel: () => (selected()?.live ? "send" : "resume"),
+    onSubmit: () => sendMsg(),
+  });
 
   // Whether the transcript is pinned to the bottom. While true, new entries
   // auto-scroll into view; once the user scrolls up to read history it flips
@@ -392,19 +356,11 @@ function Conversation() {
 
   const sendMsg = () => {
     const s = selected();
-    const text = composer.value.trim();
-    const images = picker.payload();
+    const text = composer.composeMessage().trim();
+    const images = composer.payloadImages();
     if (!s || (!text && !images.length)) return;
     actions.message(s.id, text, images.length ? images : undefined);
-    composer.value = "";
-    picker.clear();
-  };
-
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      sendMsg();
-    }
+    composer.clear();
   };
 
   // The focused sub-agent (if any) for the selected session, tracked reactively.
@@ -434,8 +390,7 @@ function Conversation() {
     const id = selectedId();
     if (id !== lastId) {
       lastId = id;
-      if (composer) composer.value = "";
-      picker.clear();
+      composer.clear();
     }
   });
 
@@ -443,7 +398,7 @@ function Conversation() {
   // sub-agent panel and transcript update through their own leaf accessors,
   // and the composer <textarea> is never recreated — so input survives events.
   const conversation = () => html`
-    <header class="conv-head">
+    <header class="conv-head" data-component="ConversationHeader">
       <div>
         <strong>${() => selected()?.label ?? ""}</strong>
         ${() => {
@@ -483,7 +438,7 @@ function Conversation() {
       const s = selected();
       if (!s || !s.subAgents.length) return "";
       const pid = `subpanel:${s.id}`;
-      return html`<div class="subagents-panel">
+      return html`<div class="subagents-panel" data-component="SubAgentTree">
         <div class="panel-title clickable" onClick=${() => toggleCollapse(pid)}>
           <span class="caret" classList=${() => ({ collapsed: isCollapsed(pid) })}>▾</span>
           🌿 sub-agent tree (${s.subAgents.length}) —
@@ -493,7 +448,7 @@ function Conversation() {
       </div>`;
     }}
 
-    <div class="transcript" ref=${(el: HTMLDivElement) => {
+    <div class="transcript" data-component="Transcript" ref=${(el: HTMLDivElement) => {
       scroller = el;
       // A freshly-mounted transcript (e.g. after switching sessions)
       // starts pinned to the bottom.
@@ -509,29 +464,11 @@ function Conversation() {
       }}
     </div>
 
-    <div class="composer"
-      onDragOver=${(e: DragEvent) => e.preventDefault()}
-      onDrop=${(e: DragEvent) => {
-        e.preventDefault();
-        if (e.dataTransfer?.files?.length) void picker.addFiles(e.dataTransfer.files);
-      }}>
-      ${AttachStrip(picker)}
-      <div class="composer-row">
-        ${AttachButton(picker)}
-        <textarea ref=${(el: HTMLTextAreaElement) => (composer = el)} rows="2"
-          placeholder=${() =>
-            selected()?.live
-              ? "Message this agent (⌘/Ctrl+Enter to send, paste/drop images)…"
-              : "Send to resume this conversation (⌘/Ctrl+Enter)…"}
-          onPaste=${(e: ClipboardEvent) => picker.addFromClipboard(e.clipboardData)}
-          onKeyDown=${onKey}></textarea>
-        <button class="primary" onClick=${sendMsg}>${() => (selected()?.live ? "send" : "resume")}</button>
-      </div>
-    </div>
+    ${composer.node}
   `;
 
   return html`
-    <main class="main">
+    <main class="main" data-component="Conversation">
       ${() => {
         const m = mode();
         if (m === "none") return html`<div class="placeholder">Select or launch an agent.</div>`;
@@ -548,7 +485,7 @@ function TopNav() {
       onClick=${() => setView(id)}>${label}</button>
   `;
   return html`
-    <nav class="topnav">
+    <nav class="topnav" data-component="TopNav">
       ${tab("agents", "Agents")}
       ${tab("pm", "Projects")}
     </nav>
@@ -556,7 +493,7 @@ function TopNav() {
 }
 
 function App() {
-  return html`<div class="root-shell">
+  return html`<div class="root-shell" data-component="App">
     <${TopNav} />
     ${() =>
       view() === "pm"

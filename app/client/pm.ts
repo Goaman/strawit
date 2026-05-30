@@ -291,7 +291,7 @@ function sessionsForTask(taskId: string): SessionSnapshot[] {
 
 function TaskCard(task: Task) {
   return html`
-    <div class="task-card">
+    <div class="task-card" data-component="TaskCard">
       ${() =>
         editingTaskId() === task.id
           ? TaskEditor({ task, projectId: task.projectId, onClose: () => setEditingTaskId(null) })
@@ -363,7 +363,7 @@ function TaskCard(task: Task) {
 
 function ProjectList() {
   return html`
-    <aside class="pm-sidebar">
+    <aside class="pm-sidebar" data-component="ProjectList">
       <div class="pm-side-head">
         <strong>Projects</strong>
         <button class="primary" onClick=${() => setShowProjectForm((v) => !v)}>
@@ -399,7 +399,7 @@ function ProjectList() {
 
 function TaskBoard() {
   return html`
-    <main class="pm-main">
+    <main class="pm-main" data-component="TaskBoard">
       ${() => {
         const p = selectedProject();
         if (!p) return html`<div class="placeholder">Select or create a project.</div>`;
@@ -466,7 +466,7 @@ function TaskBoard() {
 export function PmView() {
   onMount(refresh);
   return html`
-    <div class="pm-wrap">
+    <div class="pm-wrap" data-component="ProjectBoard">
       ${() =>
         pmError()
           ? html`<div class="pm-banner error">

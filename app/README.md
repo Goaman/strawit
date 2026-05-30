@@ -19,11 +19,16 @@ it returned).
 ## Run (from the repo root)
 
 ```bash
-bun install        # first time only
-cp .env.example .env   # then fill in SUPABASE_URL + SUPABASE_KEY (sessions live in Supabase)
-bun run start      # web UI  → http://localhost:4317
-bun run tui        # terminal UI (same backend; embeds a server if none is up)
+bun install                       # first time only
+mkdir -p ~/.strawit                # all secrets live in ~/.strawit/.env
+cp .env.example ~/.strawit/.env    # then fill it in (Supabase + Linear creds)
+bun run start                      # web UI  → http://localhost:4317
+bun run tui                        # terminal UI (same backend; embeds a server if none is up)
 ```
+
+All credentials load from **`~/.strawit/.env`** (override with `STRAWIT_ENV_FILE`)
+so the server runs from any directory; a cwd `.env` or exported env vars still
+take precedence. See `app/env.ts`.
 
 - `bun run dev` — same as `start` (no file-watch auto-restart). The server
   supervises long-lived agent sessions, so auto-restart is deliberately off:

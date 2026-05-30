@@ -3,6 +3,9 @@
 // Worker runtime files (unix sockets, pid files, stdout capture) and per-session
 // logs stay on local disk — they're inherently host-local and can't be shared.
 
+// Load credentials (SUPABASE_URL/KEY) from ~/.strawit/.env before db() reads
+// them. See app/env.ts — a single shared file holds all the app's secrets.
+import "./env.ts";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -49,8 +52,8 @@ function db(): SupabaseClient {
   const key = process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !key) {
     throw new Error(
-      "Supabase is not configured: set SUPABASE_URL and SUPABASE_KEY (see .env.example). " +
-        "Sessions are stored in Supabase, so the app cannot start without them.",
+      "Supabase is not configured: set SUPABASE_URL and SUPABASE_KEY in ~/.strawit/.env " +
+        "(see .env.example). Sessions are stored in Supabase, so the app cannot start without them.",
     );
   }
   // Server-side usage: no auth session to persist or refresh.

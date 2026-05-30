@@ -11,7 +11,7 @@
 // content like "I have 3 apples".
 const NUL = String.fromCharCode(0);
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

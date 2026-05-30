@@ -25,6 +25,7 @@ import { confirmDialog, DialogHost, installGlobalErrorHandlers } from "./dialog.
 import { isCollapsed, toggleCollapse } from "./collapse.ts";
 import { createImagePicker, type PickedImage } from "./images.ts";
 import { renderMarkdown } from "./markdown.ts";
+import { ToolCall } from "./tool-call.ts";
 import type { Project, SessionSnapshot, SubAgentNode, Task, TranscriptEntry } from "../types.ts";
 
 // Shared bits of the image-attachment UI, reused by the composer and the
@@ -334,16 +335,16 @@ function Sidebar() {
   `;
 }
 
-function Entry(props: { e: TranscriptEntry }) {
+function Entry(props: { e: TranscriptEntry; sid: string }) {
   const e = props.e;
+  // Tool calls get their own rich widget rather than the generic entry bubble.
+  if (e.kind === "tool_use") return html`<${ToolCall} e=${e} sid=${props.sid} />`;
   const head =
-    e.kind === "tool_use"
-      ? `🔧 ${e.tool ?? "tool"}`
-      : e.kind === "user"
-        ? "you"
-        : e.kind === "assistant"
-          ? "agent"
-          : e.kind;
+    e.kind === "user"
+      ? "you"
+      : e.kind === "assistant"
+        ? "agent"
+        : e.kind;
   return html`
     <div class="entry ${e.kind}">
       <span class="who">${head}</span>
@@ -505,7 +506,7 @@ function Conversation() {
         if (!s) return "";
         return s.transcript.length === 0
           ? html`<p class="empty">Waiting for the agent…</p>`
-          : s.transcript.map((e: TranscriptEntry) => html`<${Entry} e=${e} />`);
+          : s.transcript.map((e: TranscriptEntry) => html`<${Entry} e=${e} sid=${s.id} />`);
       }}
     </div>
 

@@ -32,6 +32,10 @@ export interface TranscriptEntry {
   text: string;
   // Optional extras for richer rendering.
   tool?: string;
+  // Structured input the agent passed to the tool (kind === "tool_use"), kept
+  // so the client can render a rich widget instead of a raw JSON string. Omitted
+  // when the input is absent or too large to ship (then `text` is the fallback).
+  toolInput?: unknown;
   // Images attached to a user message (kind === "user").
   images?: ImageAttachment[];
   ts: number;

@@ -183,7 +183,13 @@ class Worker {
     this.schedulePersist();
   }
 
-  private addEntry(kind: TranscriptKind, text: string, tool?: string, images?: ImageAttachment[]) {
+  private addEntry(
+    kind: TranscriptKind,
+    text: string,
+    tool?: string,
+    images?: ImageAttachment[],
+    toolInput?: unknown,
+  ) {
     const entry: TranscriptEntry = {
       id: this.nextEntryId++,
       kind,
@@ -191,6 +197,7 @@ class Worker {
         .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ""),
       tool,
+      toolInput,
       images: images && images.length ? images : undefined,
       ts: Date.now(),
     };
@@ -381,7 +388,17 @@ class Worker {
             this.addEntry("assistant", b.text);
           } else if (b.type === "tool_use") {
             const input = b.input ? JSON.stringify(b.input) : "";
-            this.addEntry("tool_use", input.length > 300 ? input.slice(0, 300) + "…" : input, b.name);
+            // Ship the structured input so the client can render a rich widget;
+            // skip it when it's too large to keep the transcript payload sane
+            // (the truncated `text` then serves as the fallback summary).
+            const structured = b.input && input.length <= 16_000 ? b.input : undefined;
+            this.addEntry(
+              "tool_use",
+              input.length > 300 ? input.slice(0, 300) + "…" : input,
+              b.name,
+              undefined,
+              structured,
+            );
           }
         }
         this.update({ status: "running", busy: true });

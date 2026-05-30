@@ -119,5 +119,14 @@ export async function startServer(opts: { port?: number; quiet?: boolean } = {})
 }
 
 if (import.meta.main) {
-  await startServer();
+  // Honour `--port 3005`, `--port=3005`, or the PORT env var.
+  const argv = process.argv.slice(2);
+  let cliPort: number | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    const raw =
+      a === "--port" || a === "-p" ? argv[++i] : a.startsWith("--port=") ? a.split("=")[1] : null;
+    if (raw != null && Number.isFinite(Number(raw))) cliPort = Number(raw);
+  }
+  await startServer({ port: cliPort });
 }

@@ -73,9 +73,10 @@ export interface SessionSnapshot extends SessionMeta {
   subAgents: SubAgentNode[];
 }
 
-// ---- Project management (local, per-worktree) ----
-// A lightweight project board scoped to this worktree. Persisted to a single
-// JSON file at the worktree root so each worktree keeps its own board.
+// ---- Project management (backed by Linear via Soda Straw) ----
+// Projects map to Linear projects and tasks to Linear issues, all under one
+// Linear team. The board talks to Linear through the Soda Straw gateway
+// (see app/linear-gateway.ts + app/pm-store.ts).
 
 export type TaskStatus = "todo" | "in_progress" | "blocked" | "done";
 
@@ -83,6 +84,8 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  // Link to the project in Linear (empty if unknown).
+  url?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -97,6 +100,8 @@ export interface Task {
   branch: string;
   // Optional working directory the task happens in (also used to launch an agent).
   cwd: string;
+  // Link to the issue in Linear (empty if unknown).
+  url?: string;
   createdAt: number;
   updatedAt: number;
 }

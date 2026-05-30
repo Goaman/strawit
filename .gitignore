@@ -21,3 +21,6 @@ app/public/client.js
 
 # local project board (per-worktree)
 .pm-data.json
+
+# secrets (Soda Straw API key, etc.)
+.env

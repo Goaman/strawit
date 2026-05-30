@@ -58,6 +58,33 @@ No `ANTHROPIC_API_KEY` required: the server points the SDK at your logged-in
 `claude` binary (`~/.local/bin/claude`, or set `CLAUDE_BIN`) so it reuses the
 CLI's credentials. Set `ANTHROPIC_API_KEY` instead if you prefer.
 
+## Project board (backed by Linear via Soda Straw)
+
+The **Projects** tab is a project board mapped onto Linear: a **Project** is a
+Linear project and a **Task** is a Linear issue, all under one Linear team. The
+server never talks to Linear directly — every read/write is proxied through the
+**Soda Straw gateway** with a scoped agent API key, so credentials, scope, and
+audit stay in Soda Straw. Configure it in `.env` (gitignored):
+
+```bash
+SODA_STRAW_GATEWAY_URL=https://<workspace>.straw.../mcp
+SODA_STRAW_API_KEY=ssa_...          # scoped agent key (straw: linear, full access)
+LINEAR_TEAM_ID=<team uuid>          # the team projects/issues live under
+SODA_STRAW_LINEAR_STRAW=linear      # straw name (optional, default "linear")
+```
+
+Mapping details:
+- `task.notes` ⇄ the issue description; `branch`/`cwd` are stored in a
+  `<!-- strawit:meta ... -->` footer appended to the description.
+- statuses `todo`/`in_progress`/`done` ⇄ Linear states **Todo**/**In Progress**/
+  **Done**; `blocked` is a **`blocked` label** (Linear has no blocked state),
+  auto-created on first use.
+- Linear's MCP has no hard delete, so **delete is a soft-delete**: the
+  issue/project is moved to **Canceled** and filtered out of the board.
+
+Relevant files: `linear-gateway.ts` (gateway client + Python-repr result
+parser), `pm-store.ts` (Linear ⇄ board mapping), `pm-api.ts` (`/api/pm/*` REST).
+
 ## How it works
 
 ```

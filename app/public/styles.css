@@ -17,7 +17,8 @@ body {
 }
 #root { height: 100vh; }
 .root-shell { height: 100vh; display: flex; flex-direction: column; }
-.app, .pm-app { flex: 1; min-height: 0; }
+.app, .pm-wrap { flex: 1; min-height: 0; }
+.pm-wrap { display: flex; flex-direction: column; }
 .app { display: grid; grid-template-columns: 300px 1fr; min-height: 0; }
 /* Grid children default to min-height:auto, which lets tall content (a long
    transcript) grow the whole row and scroll the page — dragging the sidebar
@@ -32,7 +33,19 @@ body {
 .topnav .tab.active { color: var(--text); background: var(--panel2); border-color: var(--accent2); }
 
 /* ---- project board ---- */
-.pm-app { display: grid; grid-template-columns: 260px 1fr; }
+.pm-app { display: grid; grid-template-columns: 260px 1fr; flex: 1; min-height: 0; transition: opacity .15s; }
+.pm-app.busy { opacity: .6; }
+
+/* Linear integration: error banner + links */
+.pm-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 16px; font-size: 13px; }
+.pm-banner.error { background: #3a1f23; color: #ff9aa6; border-bottom: 1px solid #5a2a30; }
+.pm-banner .banner-actions { display: flex; gap: 6px; }
+.pm-banner button { background: transparent; border: 1px solid #6a3238; color: #ff9aa6; border-radius: 7px; padding: 3px 10px; font-size: 12px; }
+.pm-banner button:hover { border-color: #ff9aa6; }
+.pm-head-title { display: flex; align-items: center; gap: 10px; }
+.linear-link, .issue-id { color: var(--accent); text-decoration: none; font-size: 12px; border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px; white-space: nowrap; }
+.linear-link:hover, .issue-id:hover { border-color: var(--accent); }
+.issue-id { color: var(--dim); font-family: ui-monospace, Menlo, monospace; margin-left: auto; }
 .pm-sidebar { background: var(--panel); border-right: 1px solid var(--border); padding: 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .pm-side-head { display: flex; align-items: center; justify-content: space-between; }
 .pm-side-head .primary { padding: 4px 10px; }

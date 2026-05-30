@@ -1,7 +1,9 @@
-// Local project board UI (SolidJS via solid-js/html). Talks to the /api/pm REST
-// endpoints; every mutation returns the full board, which we drop straight into
-// the store. CRUD for projects and tasks; tasks carry an optional branch + cwd,
-// and can launch an agent in that cwd straight into the existing console.
+// Project board UI (SolidJS via solid-js/html). Talks to the /api/pm REST
+// endpoints, which are backed by Linear through the Soda Straw gateway; every
+// mutation returns the full board, which we drop straight into the store. CRUD
+// for projects and tasks; tasks carry an optional branch + cwd, and can launch
+// an agent in that cwd straight into the existing console. Because requests now
+// hit Linear over the network, failures surface in a dismissible banner.
 
 import html from "solid-js/html";
 import { createSignal, onMount } from "solid-js";
@@ -16,6 +18,8 @@ const [showProjectForm, setShowProjectForm] = createSignal(false);
 const [editingProject, setEditingProject] = createSignal(false);
 const [showTaskForm, setShowTaskForm] = createSignal(false);
 const [editingTaskId, setEditingTaskId] = createSignal<string | null>(null);
+const [pmError, setPmError] = createSignal<string | null>(null);
+const [pmBusy, setPmBusy] = createSignal(false);
 
 const TASK_STATUS: [TaskStatus, string][] = [
   ["todo", "To do"],
@@ -25,19 +29,49 @@ const TASK_STATUS: [TaskStatus, string][] = [
 ];
 const STATUS_LABEL = Object.fromEntries(TASK_STATUS) as Record<TaskStatus, string>;
 
+async function errorOf(r: Response, fallback: string): Promise<string> {
+  const data = await r.json().catch(() => null);
+  return (data && data.error) || `${fallback} (${r.status})`;
+}
+
 async function refresh() {
-  const r = await fetch(API);
-  if (r.ok) setPmState(await r.json());
+  setPmBusy(true);
+  try {
+    const r = await fetch(API);
+    if (r.ok) {
+      setPmState(await r.json());
+      setPmError(null);
+    } else {
+      setPmError(await errorOf(r, "Failed to load board"));
+    }
+  } catch (e) {
+    setPmError(String(e));
+  } finally {
+    setPmBusy(false);
+  }
 }
 
 async function mutate(path: string, method: string, payload?: unknown): Promise<boolean> {
-  const r = await fetch(API + path, {
-    method,
-    headers: payload ? { "content-type": "application/json" } : undefined,
-    body: payload ? JSON.stringify(payload) : undefined,
-  });
-  if (r.ok) setPmState(await r.json());
-  return r.ok;
+  setPmBusy(true);
+  try {
+    const r = await fetch(API + path, {
+      method,
+      headers: payload ? { "content-type": "application/json" } : undefined,
+      body: payload ? JSON.stringify(payload) : undefined,
+    });
+    if (r.ok) {
+      setPmState(await r.json());
+      setPmError(null);
+      return true;
+    }
+    setPmError(await errorOf(r, "Request failed"));
+    return false;
+  } catch (e) {
+    setPmError(String(e));
+    return false;
+  } finally {
+    setPmBusy(false);
+  }
 }
 
 const createProject = (p: { name: string; description: string }) =>
@@ -177,6 +211,10 @@ function TaskCard(task: Task) {
               <div class="task-head">
                 <span class="tstat ${task.status}">${STATUS_LABEL[task.status]}</span>
                 <span class="task-title">${task.title}</span>
+                ${task.url
+                  ? html`<a class="issue-id" href=${task.url} target="_blank"
+                      title="open in Linear">${task.id} ↗</a>`
+                  : ""}
               </div>
               ${task.notes ? html`<div class="task-notes">${task.notes}</div>` : ""}
               ${task.branch || task.cwd
@@ -256,7 +294,13 @@ function TaskBoard() {
                 ? ProjectEditor({ project: p, onClose: () => setEditingProject(false) })
                 : html`
                     <div class="pm-head-info">
-                      <strong>${p.name}</strong>
+                      <div class="pm-head-title">
+                        <strong>${p.name}</strong>
+                        ${p.url
+                          ? html`<a class="linear-link" href=${p.url} target="_blank"
+                              title="open in Linear">Linear ↗</a>`
+                          : ""}
+                      </div>
                       ${p.description ? html`<p class="pm-desc">${p.description}</p>` : ""}
                     </div>
                     <div class="head-actions">
@@ -296,5 +340,21 @@ function TaskBoard() {
 
 export function PmView() {
   onMount(refresh);
-  return html`<div class="pm-app"><${ProjectList} /><${TaskBoard} /></div>`;
+  return html`
+    <div class="pm-wrap">
+      ${() =>
+        pmError()
+          ? html`<div class="pm-banner error">
+              <span>⚠ ${pmError()}</span>
+              <span class="banner-actions">
+                <button onClick=${() => refresh()}>retry</button>
+                <button onClick=${() => setPmError(null)}>dismiss</button>
+              </span>
+            </div>`
+          : ""}
+      <div class="pm-app" classList=${() => ({ busy: pmBusy() })}>
+        <${ProjectList} /><${TaskBoard} />
+      </div>
+    </div>
+  `;
 }

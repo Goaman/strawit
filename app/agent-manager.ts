@@ -1,17 +1,20 @@
-// Owns the lifecycle of interactive Claude agent sessions via the Agent SDK.
+// Supervises interactive Claude agent sessions — but does NOT run them in this
+// process. Each session lives in its own detached `session-worker.ts` process
+// that owns the long-lived `query()` and the `claude` subprocess it drives. The
+// manager is a *client* of those workers: it spawns them, connects to their
+// unix sockets, mirrors their state, and forwards their events to the websocket
+// hub.
 //
-// Each session keeps a long-lived `query()` running in streaming-input mode: we
-// feed it user messages through a queue-backed async generator, so a message
-// can be pushed into a *running* agent at any time (e.g. from a websocket
-// handler) and the session stays alive across turns.
-//
-// Sessions are persisted to disk (meta + transcript + sub-agent tree) and
-// reloaded on startup as dormant sessions. Sending a message to a dormant
-// session transparently resumes it via the SDK's `resume` (same sdkSessionId),
-// so conversations survive a server restart.
+// Why the indirection? So sessions survive a server restart *without killing
+// the agent*. When the server stops, the workers (and their `claude` children)
+// keep running idle between turns; when it starts again, the manager scans for
+// live worker sockets and re-attaches — the agents never died. A session with
+// no live worker is dormant; sending it a message spawns a worker that resumes
+// the prior sdk session (same transcript, same context).
 
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { existsSync, openSync, readSync, closeSync, fstatSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { connect as netConnect, type Socket } from "node:net";
+import { existsSync, openSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import type {
   ImageAttachment,
@@ -19,408 +22,260 @@ import type {
   SessionSnapshot,
   SubAgentNode,
   TranscriptEntry,
-  TranscriptKind,
 } from "./types.ts";
-import { SuperTree, type RawEvent } from "./super-tree.ts";
-import { loadAll, logPathFor, remove as removePersisted, save } from "./persistence.ts";
+import {
+  loadAll,
+  logPathFor,
+  pidPathFor,
+  remove as removePersisted,
+  socketPathFor,
+  workerOutPathFor,
+} from "./persistence.ts";
+import { readLines, writeLine, type WorkerCommand, type WorkerEvent } from "./session-protocol.ts";
 
-// Use the user's logged-in `claude` binary when present, so the SDK reuses the
-// same OAuth credentials as the CLI (no ANTHROPIC_API_KEY needed).
-const CLAUDE_BIN =
-  process.env.CLAUDE_BIN ||
-  [
-    `${process.env.HOME}/.local/bin/claude`,
-    "/opt/homebrew/bin/claude",
-    "/usr/local/bin/claude",
-  ].find((p) => existsSync(p)) ||
-  undefined;
-
-const REPO_ROOT = join(import.meta.dir, "..");
-// The super_agent MCP server: lets a console agent recursively spawn sub-agents.
-const SUPER_AGENT_SERVER =
-  process.env.SUPER_AGENT_SERVER ||
-  [
-    join(REPO_ROOT, ".claude/skills/super-agent/server.mjs"),
-    "/Volumes/Goadrive/perso/repos/strawit/.claude/skills/super-agent/server.mjs",
-  ].find((p) => existsSync(p));
-const NODE_BIN = process.env.NODE_BIN || Bun.which("node") || "node";
-const MAX_DEPTH = process.env.SUPER_AGENT_MAX_DEPTH || "5";
-
-// An async iterable you can push into at arbitrary times. The generator parks
-// on a promise when empty and resumes when a message arrives, so `query()`
-// stays alive between turns instead of ending after the first result.
-class MessageQueue implements AsyncIterable<SDKUserMessage> {
-  private items: SDKUserMessage[] = [];
-  private wake: (() => void) | null = null;
-  private closed = false;
-
-  push(msg: SDKUserMessage) {
-    this.items.push(msg);
-    this.wake?.();
-    this.wake = null;
-  }
-
-  close() {
-    this.closed = true;
-    this.wake?.();
-    this.wake = null;
-  }
-
-  async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
-    while (!this.closed || this.items.length > 0) {
-      while (this.items.length > 0) yield this.items.shift()!;
-      if (this.closed) break;
-      await new Promise<void>((resolve) => (this.wake = resolve));
-    }
-  }
-}
+const WORKER_SCRIPT = join(import.meta.dir, "session-worker.ts");
 
 type Emit = (event: ManagerEvent) => void;
 
 export type ManagerEvent =
   | { type: "session_added"; session: SessionMeta }
+  | { type: "session_snapshot"; session: SessionSnapshot }
   | { type: "session_updated"; session: SessionMeta }
   | { type: "session_removed"; id: string }
   | { type: "entry"; sessionId: string; entry: TranscriptEntry }
   | { type: "tree"; sessionId: string; subAgents: SubAgentNode[] };
 
-let nextEntryId = 1;
-export function seedEntryId(n: number) {
-  nextEntryId = Math.max(nextEntryId, n);
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Attempt a single unix-socket connection. Resolves with the socket on success,
+// or null if the worker isn't listening (no worker / stale socket file).
+function tryConnect(path: string): Promise<Socket | null> {
+  return new Promise((resolve) => {
+    const s = netConnect(path);
+    const onErr = () => {
+      s.destroy();
+      resolve(null);
+    };
+    s.once("error", onErr);
+    s.once("connect", () => {
+      s.removeListener("error", onErr);
+      resolve(s);
+    });
+  });
 }
 
-class Session {
-  meta: SessionMeta;
-  transcript: TranscriptEntry[] = [];
-  private queue: MessageQueue | null = null;
-  private q: ReturnType<typeof query> | null = null;
-  private emit: Emit;
+// Connect, retrying while a freshly-spawned worker comes up (imports the SDK,
+// starts listening). ~10s ceiling, then give up.
+async function connectWithRetry(path: string, attempts = 100, delayMs = 100): Promise<Socket | null> {
+  for (let i = 0; i < attempts; i++) {
+    const s = await tryConnect(path);
+    if (s) return s;
+    await sleep(delayMs);
+  }
+  return null;
+}
 
-  // Nested-agent lineage. While live it's folded from the super-agent log; the
-  // last view is persisted so dormant (restored) sessions still show the tree.
-  readonly logPath: string;
-  private subAgentsView: SubAgentNode[] = [];
-  private tree = new SuperTree();
-  private logFd: number | null = null;
-  private logOffset = 0;
-  private logBuf = "";
-  private logTimer: ReturnType<typeof setInterval> | null = null;
-  private persistTimer: ReturnType<typeof setTimeout> | null = null;
-
-  constructor(
-    init: { id: string; label: string; model: string | null; cwd: string },
-    emit: Emit,
-    restored?: SessionSnapshot,
-  ) {
-    this.emit = emit;
-    this.logPath = logPathFor(init.id);
-    if (restored) {
-      this.transcript = restored.transcript ?? [];
-      this.subAgentsView = restored.subAgents ?? [];
-      this.meta = { ...restored, busy: false, live: false };
-    } else {
-      this.meta = {
-        id: init.id,
-        label: init.label,
-        model: init.model,
-        cwd: init.cwd,
-        status: "starting",
-        sdkSessionId: null,
-        createdAt: Date.now(),
-        busy: true,
-        live: true,
-      };
+function cleanupRuntimeFiles(id: string) {
+  for (const p of [socketPathFor(id), pidPathFor(id)]) {
+    try {
+      if (existsSync(p)) unlinkSync(p);
+    } catch {
+      /* ignore */
     }
+  }
+}
+
+// A manager-side mirror of one session. Holds the latest known state and, when
+// the session is live, a socket to its worker.
+class Handle {
+  meta: SessionMeta;
+  transcript: TranscriptEntry[];
+  subAgents: SubAgentNode[];
+
+  private sock: Socket | null = null;
+  private emit: Emit;
+  private onGone: (id: string) => void;
+  // Commands queued while a worker is being spawned/connected.
+  private pending: WorkerCommand[] = [];
+  private connecting: Promise<void> | null = null;
+
+  constructor(snap: SessionSnapshot, emit: Emit, onGone: (id: string) => void) {
+    this.emit = emit;
+    this.onGone = onGone;
+    // Trust nothing about liveness from disk — a worker may have died with the
+    // server down. We start dormant; a successful connect flips us live via the
+    // worker's own snapshot event.
+    this.meta = { ...snap, live: false, busy: false };
+    this.transcript = snap.transcript ?? [];
+    this.subAgents = snap.subAgents ?? [];
   }
 
   snapshot(): SessionSnapshot {
-    return { ...this.meta, transcript: this.transcript, subAgents: this.subAgentsView };
+    return { ...this.meta, transcript: this.transcript, subAgents: this.subAgents };
   }
 
-  private schedulePersist() {
-    if (this.persistTimer) return;
-    this.persistTimer = setTimeout(() => {
-      this.persistTimer = null;
-      save(this.snapshot());
-    }, 400);
+  get live(): boolean {
+    return this.sock !== null;
   }
 
-  private update(patch: Partial<SessionMeta>) {
-    this.meta = { ...this.meta, ...patch };
-    this.emit({ type: "session_updated", session: this.meta });
-    this.schedulePersist();
+  // Try to re-attach to an already-running worker (startup path). Never spawns:
+  // if nothing is listening, the session simply stays dormant.
+  async reattach() {
+    const path = socketPathFor(this.meta.id);
+    if (!existsSync(path)) return;
+    const sock = await tryConnect(path);
+    if (sock) this.attach(sock);
+    else cleanupRuntimeFiles(this.meta.id); // stale socket from a dead worker
   }
 
-  private addEntry(kind: TranscriptKind, text: string, tool?: string, images?: ImageAttachment[]) {
-    const entry: TranscriptEntry = {
-      id: nextEntryId++,
-      kind,
-      // Strip ANSI escape sequences and stray control chars (the SDK sometimes
-      // embeds them, e.g. a bold code in the model name) while keeping \n and
-      // \t so the web UI's pre-wrap formatting stays intact.
-      text: text
-        .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
-        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ""),
-      tool,
-      images: images && images.length ? images : undefined,
-      ts: Date.now(),
-    };
-    this.transcript.push(entry);
-    this.emit({ type: "entry", sessionId: this.meta.id, entry });
-    this.schedulePersist();
+  // Ensure a worker is running and connected, spawning one if needed.
+  private ensureWorker(): Promise<void> {
+    if (this.sock) return Promise.resolve();
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      const path = socketPathFor(this.meta.id);
+      let sock = await tryConnect(path); // maybe one is already up
+      if (!sock) {
+        this.spawnWorker();
+        sock = await connectWithRetry(path);
+      }
+      if (sock) this.attach(sock);
+      this.connecting = null;
+    })();
+    return this.connecting;
   }
 
-  private buildOptions(resume?: string): Record<string, unknown> {
-    const options: Record<string, unknown> = {
-      cwd: this.meta.cwd,
-      permissionMode: "bypassPermissions",
-      maxTurns: 100,
-      includePartialMessages: false,
-    };
-    if (this.meta.model) options.model = this.meta.model;
-    if (CLAUDE_BIN) options.pathToClaudeCodeExecutable = CLAUDE_BIN;
-    if (resume) options.resume = resume;
+  private spawnWorker() {
+    cleanupRuntimeFiles(this.meta.id); // clear stale socket before the worker binds
+    // Capture worker stdout/stderr to a file (it's detached — no inherited tty).
+    const out = openSync(workerOutPathFor(this.meta.id), "a");
+    const child = spawn(
+      process.execPath,
+      [
+        WORKER_SCRIPT,
+        "--id",
+        this.meta.id,
+        "--label",
+        this.meta.label,
+        "--model",
+        this.meta.model ?? "",
+        "--cwd",
+        this.meta.cwd,
+      ],
+      { detached: true, stdio: ["ignore", out, out], env: process.env },
+    );
+    // Detach fully so the worker outlives this server process.
+    child.unref();
+  }
 
-    // Give the agent the super_agent tool, pointed at THIS session's isolated
-    // log, so any nested agents it spawns are tracked under this session only.
-    if (SUPER_AGENT_SERVER) {
-      options.strictMcpConfig = true; // only our server; ignore project .mcp.json
-      options.mcpServers = {
-        superagent: {
-          type: "stdio",
-          command: NODE_BIN,
-          args: [SUPER_AGENT_SERVER],
-          env: {
-            ...process.env,
-            SUPER_AGENT_DEPTH: "0",
-            SUPER_AGENT_MAX_DEPTH: MAX_DEPTH,
-            SUPER_AGENT_LOG: this.logPath,
-          },
-        },
-      };
+  private attach(sock: Socket) {
+    this.sock = sock;
+    readLines<WorkerEvent>(sock, (ev) => this.onWorkerEvent(ev));
+    sock.on("error", () => {});
+    sock.on("close", () => this.onDisconnect());
+    // Flush anything queued while we were connecting.
+    for (const c of this.pending) writeLine(sock, c);
+    this.pending = [];
+  }
+
+  private onDisconnect() {
+    this.sock = null;
+    // The worker exited (turn ended / closed) or we otherwise lost it. If we
+    // still thought it was live, mark dormant so the UI stops showing it active.
+    if (this.meta.live) {
+      this.meta = { ...this.meta, live: false, busy: false };
+      this.emit({ type: "session_updated", session: this.meta });
     }
-    return options;
   }
 
-  // Begin a fresh query loop (resume continues a prior sdk session) and stream
-  // the first user message in.
-  private begin(initialPrompt: string, resume?: string, images?: ImageAttachment[]) {
-    this.queue = new MessageQueue();
-    if (SUPER_AGENT_SERVER) {
-      this.tree = new SuperTree(); // re-folds the (persistent) log from the top
-      this.logFd = null;
-      this.logOffset = 0;
-      this.logBuf = "";
-      this.startTailer();
+  private onWorkerEvent(ev: WorkerEvent) {
+    switch (ev.type) {
+      case "snapshot":
+        this.meta = ev.session;
+        this.transcript = ev.session.transcript ?? [];
+        this.subAgents = ev.session.subAgents ?? [];
+        this.emit({ type: "session_snapshot", session: this.snapshot() });
+        return;
+      case "session_updated":
+        this.meta = ev.session;
+        this.emit({ type: "session_updated", session: this.meta });
+        return;
+      case "entry":
+        this.transcript.push(ev.entry);
+        this.emit({ type: "entry", sessionId: ev.sessionId, entry: ev.entry });
+        return;
+      case "tree":
+        this.subAgents = ev.subAgents;
+        this.emit({ type: "tree", sessionId: ev.sessionId, subAgents: ev.subAgents });
+        return;
+      case "gone":
+        this.emit({ type: "session_removed", id: ev.id });
+        this.onGone(ev.id);
+        return;
     }
-    this.update({ live: true });
-    this.q = query({ prompt: this.queue, options: this.buildOptions(resume) as any });
-    this.send(initialPrompt, images);
-    this.runLoop();
   }
 
-  // First run of a brand-new session.
-  start(initialPrompt: string, images?: ImageAttachment[]) {
-    this.begin(initialPrompt, undefined, images);
+  private command(c: WorkerCommand) {
+    if (this.sock) {
+      writeLine(this.sock, c);
+      return;
+    }
+    this.pending.push(c);
+    this.ensureWorker();
   }
 
-  // Re-attach to a dormant (restored / closed) session and continue it.
-  resume(text: string, images?: ImageAttachment[]) {
-    this.addEntry("system", "↻ resuming session");
-    this.begin(text, this.meta.sdkSessionId ?? undefined, images);
-  }
-
-  // Push a user message into the live session. Marks the agent busy. When images
-  // are attached, the SDK message carries an Anthropic content-block array
-  // (image blocks + a trailing text block) instead of a plain string.
   send(text: string, images?: ImageAttachment[]) {
-    this.addEntry("user", text, undefined, images);
-    this.update({ status: "running", busy: true });
-    const content =
-      images && images.length
-        ? [
-            ...images.map((img) => ({
-              type: "image" as const,
-              source: { type: "base64" as const, media_type: img.mediaType, data: img.data },
-            })),
-            ...(text ? [{ type: "text" as const, text }] : []),
-          ]
-        : text;
-    this.queue?.push({
-      type: "user",
-      message: { role: "user", content },
-      parent_tool_use_id: null,
-    } as SDKUserMessage);
+    this.command({ cmd: "send", text, images });
   }
 
-  async interrupt() {
-    try {
-      await this.q?.interrupt();
-      this.addEntry("system", "⏹ interrupted by user");
-    } catch (e) {
-      this.addEntry("error", `interrupt failed: ${String(e)}`);
-    }
+  interrupt() {
+    if (this.sock) writeLine(this.sock, { cmd: "interrupt" });
   }
 
   close() {
-    this.queue?.close();
-    this.stopTailer();
-    this.update({ status: "done", busy: false, live: false });
+    if (this.sock) writeLine(this.sock, { cmd: "close" });
   }
 
-  destroy() {
-    this.queue?.close();
-    this.stopTailer();
-    if (this.persistTimer) clearTimeout(this.persistTimer);
-  }
-
-  // --- super-agent log tailer (nested-agent lineage) ---
-  private startTailer() {
-    const poll = () => {
-      try {
-        if (this.logFd === null) {
-          if (!existsSync(this.logPath)) return; // created lazily on first spawn
-          this.logFd = openSync(this.logPath, "r");
-        }
-        const size = fstatSync(this.logFd).size;
-        if (size < this.logOffset) {
-          this.logOffset = 0; // truncated/rotated
-          this.logBuf = "";
-        }
-        if (size <= this.logOffset) return;
-        const len = size - this.logOffset;
-        const buf = Buffer.allocUnsafe(len);
-        const read = readSync(this.logFd, buf, 0, len, this.logOffset);
-        this.logOffset += read;
-        this.logBuf += buf.toString("utf8", 0, read);
-
-        let nl: number;
-        while ((nl = this.logBuf.indexOf("\n")) !== -1) {
-          const line = this.logBuf.slice(0, nl).trim();
-          this.logBuf = this.logBuf.slice(nl + 1);
-          if (!line) continue;
-          try {
-            this.tree.apply(JSON.parse(line) as RawEvent);
-          } catch {
-            /* skip malformed line */
-          }
-        }
-        if (this.tree.takeDirty()) {
-          this.subAgentsView = this.tree.list();
-          this.emit({ type: "tree", sessionId: this.meta.id, subAgents: this.subAgentsView });
-          this.schedulePersist();
-        }
-      } catch {
-        /* best-effort polling */
-      }
-    };
-    this.logTimer = setInterval(poll, 300);
-  }
-
-  private stopTailer() {
-    if (this.logTimer) clearInterval(this.logTimer);
-    this.logTimer = null;
-    if (this.logFd !== null) {
-      try {
-        closeSync(this.logFd);
-      } catch {
-        /* ignore */
-      }
-      this.logFd = null;
+  // Forget the session for good. A live worker is told to erase itself and
+  // exit (it emits `gone`); a dormant one is cleaned up here directly.
+  delete() {
+    if (this.sock) {
+      writeLine(this.sock, { cmd: "delete" });
+      return;
     }
-  }
-
-  private async runLoop() {
+    cleanupRuntimeFiles(this.meta.id);
+    removePersisted(this.meta.id);
     try {
-      for await (const msg of this.q!) {
-        this.handle(msg as any);
-      }
-      // Generator finished (input closed and SDK drained).
-      if (this.meta.status !== "error") this.update({ status: "done", busy: false, live: false });
-    } catch (e) {
-      this.addEntry("error", String((e as Error)?.message ?? e));
-      this.update({ status: "error", busy: false, live: false });
-    } finally {
-      this.stopTailer();
+      if (existsSync(logPathFor(this.meta.id))) unlinkSync(logPathFor(this.meta.id));
+    } catch {
+      /* ignore */
     }
-  }
-
-  private handle(msg: any) {
-    switch (msg.type) {
-      case "system":
-        if (msg.subtype === "init") {
-          this.update({ sdkSessionId: msg.session_id ?? this.meta.sdkSessionId });
-          this.addEntry("system", `session ready (model: ${msg.model ?? this.meta.model ?? "default"})`);
-        }
-        return;
-
-      case "assistant": {
-        const blocks = msg.message?.content ?? [];
-        for (const b of blocks) {
-          if (b.type === "text" && b.text?.trim()) {
-            this.addEntry("assistant", b.text);
-          } else if (b.type === "tool_use") {
-            const input = b.input ? JSON.stringify(b.input) : "";
-            this.addEntry(
-              "tool_use",
-              input.length > 300 ? input.slice(0, 300) + "…" : input,
-              b.name,
-            );
-          }
-        }
-        this.update({ status: "running", busy: true });
-        return;
-      }
-
-      case "result": {
-        const txt = typeof msg.result === "string" ? msg.result : "";
-        const cost =
-          typeof msg.total_cost_usd === "number"
-            ? ` ($${msg.total_cost_usd.toFixed(4)})`
-            : "";
-        if (msg.subtype && msg.subtype !== "success") {
-          this.addEntry("error", `turn ended: ${msg.subtype}${cost}`);
-        } else if (txt) {
-          this.addEntry("result", `✓ done${cost}`);
-        }
-        // Turn finished — agent is now idle and ready for the next message.
-        this.update({ status: "idle", busy: false });
-        return;
-      }
-
-      // SDK "user" messages echo tool results back; we already show tool_use,
-      // so skip to avoid duplicate noise.
-      default:
-        return;
-    }
+    this.emit({ type: "session_removed", id: this.meta.id });
+    this.onGone(this.meta.id);
   }
 }
 
 export class AgentManager {
-  private sessions = new Map<string, Session>();
+  private handles = new Map<string, Handle>();
   private emit: Emit;
   private seq = 0;
 
   constructor(emit: Emit) {
     this.emit = emit;
-    // Restore persisted sessions as dormant (not yet live).
-    let maxEntryId = 0;
     for (const snap of loadAll()) {
-      const session = new Session(
-        { id: snap.id, label: snap.label, model: snap.model, cwd: snap.cwd },
-        emit,
-        snap,
-      );
-      this.sessions.set(snap.id, session);
-      for (const e of snap.transcript ?? []) maxEntryId = Math.max(maxEntryId, e.id);
+      const h = new Handle(snap, emit, (id) => this.handles.delete(id));
+      this.handles.set(snap.id, h);
       const n = Number(snap.id.match(/^s(\d+)-/)?.[1] ?? 0);
       this.seq = Math.max(this.seq, n);
     }
-    seedEntryId(maxEntryId + 1);
+    // Re-attach to any workers that outlived a previous server, in the
+    // background — list() already returns the dormant snapshots immediately, and
+    // a successful re-attach emits a session_snapshot that updates clients.
+    for (const h of this.handles.values()) void h.reattach();
   }
 
   list(): SessionSnapshot[] {
-    return [...this.sessions.values()].map((s) => s.snapshot());
+    return [...this.handles.values()].map((h) => h.snapshot());
   }
 
   create(input: {
@@ -434,36 +289,41 @@ export class AgentManager {
     const label = input.label?.trim() || `agent ${this.seq}`;
     const cwd = input.cwd?.trim() || process.cwd();
     const model = input.model?.trim() || null;
-    const session = new Session({ id, label, model, cwd }, this.emit);
-    this.sessions.set(id, session);
-    this.emit({ type: "session_added", session: session.meta });
-    session.start(input.prompt, input.images);
-    return session.meta;
+    const meta: SessionMeta = {
+      id,
+      label,
+      model,
+      cwd,
+      status: "starting",
+      sdkSessionId: null,
+      createdAt: Date.now(),
+      busy: true,
+      live: false,
+    };
+    const h = new Handle({ ...meta, transcript: [], subAgents: [] }, this.emit, (rid) =>
+      this.handles.delete(rid),
+    );
+    this.handles.set(id, h);
+    this.emit({ type: "session_added", session: meta });
+    h.send(input.prompt, input.images); // spawns the worker and starts the agent
+    return meta;
   }
 
-  // Live sessions get the message pushed in; dormant ones are resumed first.
+  // Live or dormant: the handle spawns/connects a worker as needed, then the
+  // worker either pushes the message into the running agent or resumes it.
   send(id: string, text: string, images?: ImageAttachment[]) {
-    const s = this.sessions.get(id);
-    if (!s) return;
-    if (s.meta.live) s.send(text, images);
-    else s.resume(text, images);
+    this.handles.get(id)?.send(text, images);
   }
 
   async interrupt(id: string) {
-    await this.sessions.get(id)?.interrupt();
+    this.handles.get(id)?.interrupt();
   }
 
   close(id: string) {
-    this.sessions.get(id)?.close();
+    this.handles.get(id)?.close();
   }
 
-  // Permanently forget a session (stop it if live, drop its persisted file).
   delete(id: string) {
-    const s = this.sessions.get(id);
-    if (!s) return;
-    s.destroy();
-    this.sessions.delete(id);
-    removePersisted(id);
-    this.emit({ type: "session_removed", id });
+    this.handles.get(id)?.delete();
   }
 }

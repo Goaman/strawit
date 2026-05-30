@@ -53,6 +53,16 @@ function apply(msg: ServerMessage) {
       setSessions((list) => [...list, { ...msg.session, transcript: [], subAgents: [] }]);
       if (!selectedId()) setSelectedId(msg.session.id);
       break;
+    case "session_snapshot":
+      // Replace this session's full state (or add it if unseen), e.g. when the
+      // server re-attaches to a worker that kept running across a restart.
+      setSessions((list) =>
+        list.some((s) => s.id === msg.session.id)
+          ? list.map((s) => (s.id === msg.session.id ? msg.session : s))
+          : [...list, msg.session],
+      );
+      if (!selectedId()) setSelectedId(msg.session.id);
+      break;
     case "session_updated":
       patchSession(msg.session.id, (s) => ({ ...s, ...msg.session }));
       break;

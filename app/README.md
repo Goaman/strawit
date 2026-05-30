@@ -31,13 +31,22 @@ The web UI: **+ new agent** → task → launch; type in the composer (⌘/Ctrl+
 to message the running agent. The TUI: `j/k` select · `n` new · `m` message ·
 `g` interrupt · `x` close · `q` quit.
 
-## Persistence
+## Persistence — agents survive a server restart, *still running*
 
-Sessions (metadata, transcript, sub-agent tree) are saved under
-`~/.agent-console/` (override with `AGENT_CONSOLE_DIR`) and reloaded on startup,
-so your conversations are still there after a restart. A restored session is
-**dormant**; sending it a message **resumes** it via the SDK's `resume` (same
-session id), so you can keep talking to it. `delete` forgets a session for good.
+Each session runs in its own **detached worker process** (`session-worker.ts`)
+that owns the long-lived `query()` and the `claude` subprocess it drives. The
+web server is just a *supervisor*: it spawns workers, connects to their unix
+sockets (`~/.agent-console/workers/<id>.sock`), and relays their events to the
+UI. Because the workers are detached, **stopping the server does not kill the
+agents** — they keep running idle between turns. When the server starts again it
+scans for live worker sockets and **re-attaches** to the running agents: a
+mid-turn agent keeps streaming, and you can message it as if nothing happened.
+
+Metadata, transcript and sub-agent tree are also saved under `~/.agent-console/`
+(override with `AGENT_CONSOLE_DIR`). A session whose worker has exited (you
+`close`d it, or its turn ended and you quit) is **dormant**; sending it a message
+spawns a fresh worker that **resumes** the prior SDK session (same id, same
+context). `delete` stops the worker and forgets the session for good.
 
 ## Auth
 
@@ -48,23 +57,34 @@ CLI's credentials. Set `ANTHROPIC_API_KEY` instead if you prefer.
 ## How it works
 
 ```
-web (SolidJS) ─┐                 ┌─ one query() per session (SDK, streaming in)
-tui (ANSI)    ─┴─ ws ─▶ Bun server ─▶ AgentManager ─ MessageQueue → push anytime
-                        (hub,            │           ─ resume() restores dormant
-                         fan-out)        │           ─ persist to ~/.agent-console
-                                         └─ per-session super-agent log → SuperTree
+web (SolidJS) ─┐                 ┌─ AgentManager (supervisor): spawn + connect
+tui (ANSI)    ─┴─ ws ─▶ Bun server ─┤   │
+                        (hub,        │   └─ unix socket ─▶ session-worker (DETACHED)
+                         fan-out)    │                       ├─ query() ── claude (SDK)
+              outlives the server ──▶│                       ├─ MessageQueue → push
+                                     │                       ├─ super-agent log → SuperTree
+                                     │                       └─ persist to ~/.agent-console
+                                     └─ on restart: re-attach to live worker sockets
 ```
 
 - **`server.ts`** — `startServer()`: bundles the client (`Bun.build`, no JSX
   step), serves static files, runs the `/ws` hub (snapshot on connect +
   broadcast). Runs directly or is embedded by the TUI.
-- **`agent-manager.ts`** — session lifecycle: live `query()`, streaming-input
-  `MessageQueue`, resume of dormant sessions, debounced persistence. Each session
-  wires in the `super_agent` MCP server pointed at its **own isolated log file**,
-  tailed live so nested-agent activity is provably that session's.
+- **`agent-manager.ts`** — the **supervisor**. Spawns a detached worker per
+  session, connects to its socket, mirrors its state, and forwards events to the
+  hub. On startup it re-attaches to any worker that outlived a previous server;
+  otherwise it loads the dormant snapshot and spawns a worker on the next message.
+- **`session-worker.ts`** — the detached, long-lived **agent process**. Owns the
+  streaming-input `query()` + `MessageQueue`, the `super_agent` MCP server pointed
+  at its **own isolated log file** (tailed live), and debounced persistence.
+  Listens on a unix socket; the first message starts a fresh agent or resumes a
+  prior SDK session. Exits only when the agent ends (`done`/`close`) or is deleted.
+- **`session-protocol.ts`** — the newline-delimited JSON command/event types
+  exchanged over the worker socket, plus the framing helpers.
 - **`super-tree.ts`** — pure reducer folding `spawn`/`server_start`/`child_done`
   log events into a lineage tree, stitching parent→child by depth + FIFO order.
-- **`persistence.ts`** — JSON-per-session load/save under `~/.agent-console/`.
+- **`persistence.ts`** — JSON-per-session load/save under `~/.agent-console/`,
+  plus the worker socket/pid path helpers used to find and re-attach to workers.
 - **`client/`** — SolidJS via the `solid-js/html` tagged template (real
   fine-grained reactivity, bundled by Bun — no Babel/Vite).
 - **`tui.ts`** — ANSI terminal client over the same websocket. All dynamic text

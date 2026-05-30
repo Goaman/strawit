@@ -110,6 +110,9 @@ export interface PmState {
 export type ServerMessage =
   | { type: "snapshot"; sessions: SessionSnapshot[] }
   | { type: "session_added"; session: SessionMeta }
+  // Full state for a single session — sent when the server (re)attaches to its
+  // worker, so clients pick up anything that happened while the server was down.
+  | { type: "session_snapshot"; session: SessionSnapshot }
   | { type: "session_updated"; session: SessionMeta }
   | { type: "session_removed"; id: string }
   | { type: "entry"; sessionId: string; entry: TranscriptEntry }

@@ -104,6 +104,11 @@ function apply(msg: ServerMessage) {
     case "session_added":
       sessions = [...sessions, { ...msg.session, transcript: [], subAgents: [] }];
       break;
+    case "session_snapshot":
+      sessions = sessions.some((s) => s.id === msg.session.id)
+        ? sessions.map((s) => (s.id === msg.session.id ? msg.session : s))
+        : [...sessions, msg.session];
+      break;
     case "session_updated":
       sessions = sessions.map((s) => (s.id === msg.session.id ? { ...s, ...msg.session } : s));
       break;

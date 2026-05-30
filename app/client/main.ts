@@ -69,6 +69,15 @@ function SubTreeImpl(nodes: SubAgentNode[], parent: string | null, sessionId: st
   </div>`;
 }
 
+// Does this session have at least one sub-agent we can still interrupt (running
+// or just-spawned, with a live process group)? Drives the "interrupt all
+// sub-agents" button in both the main and sub-agent headers.
+function hasRunningSubs(s: SessionSnapshot): boolean {
+  return s.subAgents.some(
+    (n) => (n.status === "running" || n.status === "spawning") && !!n.childPid,
+  );
+}
+
 // Focused view of a single sub-agent: the back-and-forth it has had (its
 // spawning prompt + the user's follow-ups), any agents it spawned, and controls
 // to *interrupt* it mid-run or *talk to* it (a follow-up that resumes its
@@ -161,6 +170,14 @@ function SubAgentDetail(
                     if (n && s) actions.interruptSub(s.id, n.key);
                   }}>interrupt</button>`
               : ""}
+          ${() => {
+            const s = sessionAcc();
+            return s && hasRunningSubs(s)
+              ? html`<button class="warn"
+                  title="interrupt every running sub-agent of this session"
+                  onClick=${() => actions.interruptAllSubs(s.id)}>interrupt all</button>`
+              : "";
+          }}
         </div>
       </header>
       <div class="transcript">
@@ -528,6 +545,13 @@ function Conversation() {
           if (!s || !s.live) return "";
           return html`<button onClick=${() => actions.interrupt(s.id)} disabled=${() => !selected()?.busy}>interrupt</button>
                  <button onClick=${() => actions.close(s.id)}>close</button>`;
+        }}
+        ${() => {
+          const s = selected();
+          return s && hasRunningSubs(s)
+            ? html`<button class="warn" title="interrupt every running sub-agent of this session"
+                onClick=${() => actions.interruptAllSubs(s.id)}>interrupt sub-agents</button>`
+            : "";
         }}
         <button class="danger"
           onClick=${async () => {

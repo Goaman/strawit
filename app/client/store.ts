@@ -194,6 +194,9 @@ export const actions = {
   // Interrupt / talk-to a single nested sub-agent within a session.
   interruptSub: (sessionId: string, key: string) =>
     send({ type: "interrupt_sub", sessionId, key }),
+  // Interrupt every running nested sub-agent of a session at once.
+  interruptAllSubs: (sessionId: string) =>
+    send({ type: "interrupt_all_subs", sessionId }),
   messageSub: (sessionId: string, key: string, text: string) =>
     send({ type: "send_sub", sessionId, key, text }),
   close: (sessionId: string) => send({ type: "close", sessionId }),

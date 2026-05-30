@@ -322,26 +322,13 @@ class Worker {
     this.schedulePersist();
   }
 
-  // Interrupt one sub-agent: signal its process group. For the spawning run this
-  // kills the nested `claude` (its parent's super_agent tool then logs child_exit,
-  // which the tailer folds into the node); for a follow-up run we spawned, our own
-  // close handler finishes the turn. Killing the group also stops anything it
-  // spawned in turn.
-  private interruptSub(key: string) {
-    const node = this.tree.byKey(key);
-    if (!node) {
-      this.addEntry("error", `sub-agent ${key} not found`);
-      return;
-    }
-    const pid = node.childPid;
-    if (!pid) {
-      this.addEntry("system", "can't interrupt this sub-agent — no live process for it");
-      return;
-    }
-    const label = node.prompt ? `"${node.prompt.slice(0, 48)}${node.prompt.length > 48 ? "…" : ""}"` : key;
+  // Signal a sub-agent's process group dead (SIGTERM now, SIGKILL shortly after if
+  // it lingers). Killing the group also stops anything that run spawned in turn.
+  // Returns false only if there's no live process to signal.
+  private killGroup(pid: number | null | undefined): boolean {
+    if (!pid) return false;
     try {
       process.kill(-pid, "SIGTERM");
-      // Escalate if it ignores the polite signal.
       setTimeout(() => {
         try {
           process.kill(-pid, "SIGKILL");
@@ -349,7 +336,6 @@ class Worker {
           /* already gone */
         }
       }, 2500);
-      this.addEntry("system", `⏹ interrupted sub-agent ${label}`);
     } catch {
       // Not a group leader (legacy) or already dead — try the bare pid.
       try {
@@ -357,8 +343,43 @@ class Worker {
       } catch {
         /* already gone */
       }
-      this.addEntry("system", `⏹ interrupt sent to sub-agent ${label}`);
     }
+    return true;
+  }
+
+  // Interrupt one sub-agent: signal its process group. For the spawning run this
+  // kills the nested `claude` (its parent's super_agent tool then logs child_exit,
+  // which the tailer folds into the node); for a follow-up run we spawned, our own
+  // close handler finishes the turn.
+  private interruptSub(key: string) {
+    const node = this.tree.byKey(key);
+    if (!node) {
+      this.addEntry("error", `sub-agent ${key} not found`);
+      return;
+    }
+    if (!this.killGroup(node.childPid)) {
+      this.addEntry("system", "can't interrupt this sub-agent — no live process for it");
+      return;
+    }
+    const label = node.prompt ? `"${node.prompt.slice(0, 48)}${node.prompt.length > 48 ? "…" : ""}"` : key;
+    this.addEntry("system", `⏹ interrupted sub-agent ${label}`);
+  }
+
+  // Interrupt every currently-running sub-agent of this session in one shot. Each
+  // sub-agent runs in its own process group (even ones spawned by another
+  // sub-agent), so we must signal each live node individually — killing one
+  // parent would not reap its already-detached children.
+  private interruptAllSubs() {
+    const live = this.tree
+      .list()
+      .filter((n) => (n.status === "running" || n.status === "spawning") && n.childPid);
+    if (!live.length) {
+      this.addEntry("system", "no running sub-agents to interrupt");
+      return;
+    }
+    let killed = 0;
+    for (const n of live) if (this.killGroup(n.childPid)) killed++;
+    this.addEntry("system", `⏹ interrupted ${killed} sub-agent${killed === 1 ? "" : "s"}`);
   }
 
   // Talk to a sub-agent: resume its `claude` session with a follow-up message so
@@ -631,6 +652,9 @@ class Worker {
         return;
       case "interrupt_sub":
         this.interruptSub(c.key);
+        return;
+      case "interrupt_all_subs":
+        this.interruptAllSubs();
         return;
       case "send_sub":
         this.resumeSub(c.key, c.text);

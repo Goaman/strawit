@@ -164,6 +164,8 @@ export type ClientMessage =
   | { type: "interrupt"; sessionId: string }
   // Interrupt a single nested sub-agent (and the run it is in the middle of).
   | { type: "interrupt_sub"; sessionId: string; key: string }
+  // Interrupt every running nested sub-agent of this session at once.
+  | { type: "interrupt_all_subs"; sessionId: string }
   // Send a follow-up to a nested sub-agent — resumes its session with context.
   | { type: "send_sub"; sessionId: string; key: string; text: string }
   | { type: "close"; sessionId: string }

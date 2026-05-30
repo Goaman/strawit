@@ -112,6 +112,9 @@ export async function startServer(opts: { port?: number; quiet?: boolean } = {})
           case "interrupt_sub":
             manager.interruptSub(msg.sessionId, msg.key);
             break;
+          case "interrupt_all_subs":
+            manager.interruptAllSubs(msg.sessionId);
+            break;
           case "send_sub":
             manager.sendSub(msg.sessionId, msg.key, msg.text);
             break;

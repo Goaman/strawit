@@ -139,6 +139,9 @@ button {
 button:hover { border-color: var(--accent); }
 button:disabled { opacity: .4; cursor: default; }
 button.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; color: #0d0f14; font-weight: 600; }
+/* "interrupt all sub-agents" — amber, distinct from the red destructive delete. */
+button.warn { color: #f0c674; border-color: #5a4a2a; }
+button.warn:hover { border-color: #f0c674; }
 
 .form { display: flex; flex-direction: column; gap: 5px; background: var(--panel2); padding: 10px; border-radius: var(--radius); border: 1px solid var(--border); }
 .form textarea, .form input, .form select, .composer textarea {

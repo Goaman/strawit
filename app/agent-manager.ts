@@ -250,6 +250,10 @@ class Handle {
     this.command({ cmd: "interrupt_sub", key });
   }
 
+  interruptAllSubs() {
+    this.command({ cmd: "interrupt_all_subs" });
+  }
+
   sendSub(key: string, text: string) {
     this.command({ cmd: "send_sub", key, text });
   }
@@ -370,6 +374,10 @@ export class AgentManager {
 
   interruptSub(id: string, key: string) {
     this.handles.get(id)?.interruptSub(key);
+  }
+
+  interruptAllSubs(id: string) {
+    this.handles.get(id)?.interruptAllSubs();
   }
 
   sendSub(id: string, key: string, text: string) {

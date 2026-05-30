@@ -46,6 +46,9 @@ export function createComposer(opts: ComposerOptions = {}): Composer {
   const [menuOpen, setMenuOpen] = createSignal(false);
   const [query, setQuery] = createSignal("");
   const [activeIdx, setActiveIdx] = createSignal(0);
+  // The "+" button opens the same command list as a click-driven popover
+  // (vs. the "/"-typed slash menu above).
+  const [plusOpen, setPlusOpen] = createSignal(false);
 
   let textarea!: HTMLTextAreaElement;
   let fileEl!: HTMLInputElement;
@@ -100,8 +103,23 @@ export function createComposer(opts: ComposerOptions = {}): Composer {
     cmd.run();
   };
 
+  // Run a command picked from the "+" popover (no slash token to strip).
+  const runPlainCommand = (cmd: SlashCommand) => {
+    setPlusOpen(false);
+    cmd.run();
+  };
+
+  // Grow the textarea with its content (CSS caps it via max-height).
+  const autosize = () => {
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+
   const onInput = () => {
     setText(textarea.value);
+    setPlusOpen(false);
+    autosize();
     detectSlash();
   };
 
@@ -136,11 +154,15 @@ export function createComposer(opts: ComposerOptions = {}): Composer {
   };
 
   const clear = () => {
-    if (textarea) textarea.value = "";
+    if (textarea) {
+      textarea.value = "";
+      textarea.style.height = "auto";
+    }
     setText("");
     picker.clear();
     setElements([]);
     setMenuOpen(false);
+    setPlusOpen(false);
   };
   const focus = () => textarea?.focus();
 
@@ -235,19 +257,53 @@ export function createComposer(opts: ComposerOptions = {}): Composer {
                   )}
               </div>`
             : ""}
-      </div>
 
-      <div class="composer2-actions">
-        <button type="button" class="icon-btn" title="Attach image(s)  ( /attach )"
-          onClick=${() => fileEl.click()}>📎</button>
-        <button type="button" class="icon-btn" classList=${() => ({ active: picking() })}
-          title="Select a UI element  ( /select )"
-          onClick=${() => void startPick()}>🎯</button>
-        <span class="composer2-hint">type <kbd>/</kbd> for commands · <kbd>🎯</kbd> to point at the UI</span>
-        ${opts.submitLabel
-          ? html`<button class="primary" type="button" onClick=${() => opts.onSubmit?.()}>${() =>
-              opts.submitLabel!()}</button>`
-          : ""}
+        <div class="composer2-bar">
+          <div class="composer2-left">
+            <button type="button" class="round-btn plus-btn" classList=${() => ({ active: plusOpen() })}
+              title="Add — attach an image or point at the UI"
+              onMouseDown=${(e: MouseEvent) => {
+                e.preventDefault();
+                setPlusOpen((v) => !v);
+              }}>
+              <span class="plus-glyph">+</span>
+            </button>
+            ${() =>
+              plusOpen()
+                ? html`<div class="plus-menu">
+                    ${COMMANDS.map(
+                      (c: SlashCommand) => html`
+                        <div class="slash-item"
+                          onMouseDown=${(e: MouseEvent) => {
+                            e.preventDefault();
+                            runPlainCommand(c);
+                          }}>
+                          <span class="slash-ico">${c.name === "attach" ? "📎" : "🎯"}</span>
+                          <span class="slash-name">/${c.name}</span>
+                          <span class="slash-hint">${c.hint}</span>
+                        </div>`,
+                    )}
+                  </div>`
+                : ""}
+          </div>
+
+          <div class="composer2-right">
+            <button type="button" class="round-btn" title="Attach image(s)  ( /attach )"
+              onMouseDown=${(e: MouseEvent) => e.preventDefault()}
+              onClick=${() => fileEl.click()}>📎</button>
+            <button type="button" class="round-btn" classList=${() => ({ active: picking() })}
+              title="Select a UI element  ( /select )"
+              onMouseDown=${(e: MouseEvent) => e.preventDefault()}
+              onClick=${() => void startPick()}>🎯</button>
+            ${opts.submitLabel
+              ? html`<button class="round-btn send-btn" type="button"
+                  title=${() => opts.submitLabel!()}
+                  onClick=${() => opts.onSubmit?.()}>
+                  <span class="send-glyph">↑</span>
+                </button>`
+              : ""}
+          </div>
+        </div>
       </div>
     </div>
   `;

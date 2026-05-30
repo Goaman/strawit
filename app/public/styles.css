@@ -185,6 +185,54 @@ button.danger:hover { border-color: #ff7a8a; }
 .entry.system .text { color: var(--dim); background: transparent; border-style: dashed; }
 .entry.error .text { color: #ff7a8a; background: #2a1416; border-color: #3a1f23; }
 
+/* Rendered Markdown in assistant replies. Overrides the pre-wrap plain-text
+   layout with real block flow, while keeping the bubble styling. */
+.entry .text.markdown { white-space: normal; }
+.entry .text.markdown > :first-child { margin-top: 0; }
+.entry .text.markdown > :last-child { margin-bottom: 0; }
+.entry .text.markdown p { margin: 0 0 8px; }
+.entry .text.markdown h1,
+.entry .text.markdown h2,
+.entry .text.markdown h3,
+.entry .text.markdown h4,
+.entry .text.markdown h5,
+.entry .text.markdown h6 {
+  margin: 14px 0 6px; line-height: 1.25; font-weight: 650;
+}
+.entry .text.markdown h1 { font-size: 1.35em; }
+.entry .text.markdown h2 { font-size: 1.2em; }
+.entry .text.markdown h3 { font-size: 1.08em; }
+.entry .text.markdown h4,
+.entry .text.markdown h5,
+.entry .text.markdown h6 { font-size: 1em; color: var(--dim); }
+.entry .text.markdown ul,
+.entry .text.markdown ol { margin: 0 0 8px; padding-left: 1.4em; }
+.entry .text.markdown li { margin: 2px 0; }
+.entry .text.markdown li > ul,
+.entry .text.markdown li > ol { margin: 2px 0; }
+.entry .text.markdown a { color: var(--accent); text-decoration: none; }
+.entry .text.markdown a:hover { text-decoration: underline; }
+.entry .text.markdown strong { font-weight: 650; color: #f2f4fb; }
+.entry .text.markdown em { font-style: italic; }
+.entry .text.markdown code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .88em;
+  background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 4px;
+}
+.entry .text.markdown pre {
+  margin: 0 0 8px; padding: 9px 11px; overflow-x: auto;
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.entry .text.markdown pre code {
+  background: none; border: 0; padding: 0; font-size: 12px; white-space: pre;
+}
+.entry .text.markdown blockquote {
+  margin: 0 0 8px; padding: 2px 0 2px 11px;
+  border-left: 3px solid var(--accent2); color: var(--dim);
+}
+.entry .text.markdown blockquote > :last-child { margin-bottom: 0; }
+.entry .text.markdown hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+
 .composer { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--border); }
 .composer-row { display: flex; gap: 6px; align-items: flex-end; }
 .composer textarea { flex: 1; }

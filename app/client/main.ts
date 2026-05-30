@@ -24,6 +24,7 @@ import { PmView } from "./pm.ts";
 import { confirmDialog, DialogHost, installGlobalErrorHandlers } from "./dialog.ts";
 import { isCollapsed, toggleCollapse } from "./collapse.ts";
 import { createImagePicker, type PickedImage } from "./images.ts";
+import { renderMarkdown } from "./markdown.ts";
 import type { Project, SessionSnapshot, SubAgentNode, Task, TranscriptEntry } from "../types.ts";
 
 // Shared bits of the image-attachment UI, reused by the composer and the
@@ -354,7 +355,11 @@ function Entry(props: { e: TranscriptEntry }) {
             )}
           </div>`
         : ""}
-      ${e.text ? html`<div class="text">${e.text}</div>` : ""}
+      ${e.text
+        ? e.kind === "assistant"
+          ? html`<div class="text markdown" innerHTML=${renderMarkdown(e.text)}></div>`
+          : html`<div class="text">${e.text}</div>`
+        : ""}
     </div>
   `;
 }

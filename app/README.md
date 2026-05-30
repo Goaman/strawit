@@ -64,7 +64,9 @@ The **Projects** tab is a project board mapped onto Linear: a **Project** is a
 Linear project and a **Task** is a Linear issue, all under one Linear team. The
 server never talks to Linear directly — every read/write is proxied through the
 **Soda Straw gateway** with a scoped agent API key, so credentials, scope, and
-audit stay in Soda Straw. Configure it in `.env` (gitignored):
+audit stay in Soda Straw. Credentials load from **`~/.strawit/.env`** (override
+with `STRAWIT_ENV_FILE`) so the server works from any directory; a `.env` in the
+cwd or the ambient environment also works and takes precedence:
 
 ```bash
 SODA_STRAW_GATEWAY_URL=https://<workspace>.straw.../mcp

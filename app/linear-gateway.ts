@@ -3,7 +3,8 @@
 // The board backend never talks to Linear directly — every call is proxied
 // through Soda Straw's MCP gateway with a scoped agent API key (straw: linear).
 // That keeps credentials, scope, and audit in Soda Straw rather than on this
-// box. Config comes from the environment (see .env):
+// box. Config is read from the environment, loaded from ~/.strawit/.env (or
+// STRAWIT_ENV_FILE, or a cwd .env / the ambient env):
 //
 //   SODA_STRAW_GATEWAY_URL   e.g. https://<workspace>.straw.../mcp
 //   SODA_STRAW_API_KEY       scoped agent key (ssa_...)
@@ -14,6 +15,42 @@
 // *Python-repr strings* (single quotes, True/False/None, \n escapes) nested
 // inside the JSON `result` field — so we JSON.parse the envelope, then run the
 // inner string through a small Python-literal parser (parsePyLiteral).
+
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+// Load credentials from a stable, machine-wide location so the server works no
+// matter which directory (or worktree) it's launched from. ~/.strawit/.env is
+// the canonical home (override with STRAWIT_ENV_FILE). Bun already auto-loads a
+// .env in the cwd before any code runs; we only fill in keys that aren't set
+// yet, so an explicit env / cwd .env always wins. This runs before the config
+// constants below read process.env (module bodies execute top-to-bottom).
+function loadEnvFile(): void {
+  const path = process.env.STRAWIT_ENV_FILE || join(homedir(), ".strawit", ".env");
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return; // no file there — rely on the ambient environment
+  }
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+loadEnvFile();
 
 const GATEWAY_URL = process.env.SODA_STRAW_GATEWAY_URL || "";
 const API_KEY = process.env.SODA_STRAW_API_KEY || "";
@@ -30,7 +67,7 @@ export function gatewayConfigError(): string {
     !API_KEY && "SODA_STRAW_API_KEY",
     !TEAM_ID && "LINEAR_TEAM_ID",
   ].filter(Boolean);
-  return `Soda Straw gateway not configured — missing ${missing.join(", ")} (set them in .env).`;
+  return `Soda Straw gateway not configured — missing ${missing.join(", ")} (set them in ~/.strawit/.env).`;
 }
 
 // ---- Python-literal parser --------------------------------------------------

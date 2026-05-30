@@ -25,7 +25,7 @@ import { confirmDialog, DialogHost, installGlobalErrorHandlers } from "./dialog.
 import { isCollapsed, toggleCollapse } from "./collapse.ts";
 import { createComposer } from "./composer.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { ToolCall } from "./tool-call.ts";
+import { ToolGroup } from "./tool-call.ts";
 import type { Project, SessionSnapshot, SubAgentNode, Task, TranscriptEntry } from "../types.ts";
 
 // Recursive lineage of nested agents spawned via super_agent. Clicking a node
@@ -290,10 +290,32 @@ function Sidebar() {
   `;
 }
 
+// Fold a transcript into render items, collapsing each run of consecutive
+// tool calls into one group (so they share a single linked timeline + Done).
+type RenderItem =
+  | { kind: "entry"; entry: TranscriptEntry }
+  | { kind: "tools"; entries: TranscriptEntry[] };
+
+function groupTranscript(transcript: TranscriptEntry[]): RenderItem[] {
+  const items: RenderItem[] = [];
+  let run: TranscriptEntry[] | null = null;
+  for (const e of transcript) {
+    if (e.kind === "tool_use") {
+      if (!run) {
+        run = [];
+        items.push({ kind: "tools", entries: run });
+      }
+      run.push(e);
+    } else {
+      run = null;
+      items.push({ kind: "entry", entry: e });
+    }
+  }
+  return items;
+}
+
 function Entry(props: { e: TranscriptEntry; sid: string }) {
   const e = props.e;
-  // Tool calls get their own rich widget rather than the generic entry bubble.
-  if (e.kind === "tool_use") return html`<${ToolCall} e=${e} sid=${props.sid} />`;
   const head =
     e.kind === "user"
       ? "you"
@@ -459,9 +481,12 @@ function Conversation() {
       ${() => {
         const s = selected();
         if (!s) return "";
-        return s.transcript.length === 0
-          ? html`<p class="empty">Waiting for the agent…</p>`
-          : s.transcript.map((e: TranscriptEntry) => html`<${Entry} e=${e} sid=${s.id} />`);
+        if (s.transcript.length === 0) return html`<p class="empty">Waiting for the agent…</p>`;
+        return groupTranscript(s.transcript).map((it) =>
+          it.kind === "tools"
+            ? html`<${ToolGroup} entries=${it.entries} sid=${s.id} />`
+            : html`<${Entry} e=${it.entry} sid=${s.id} />`,
+        );
       }}
     </div>
 

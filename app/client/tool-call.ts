@@ -1,11 +1,12 @@
 // Rich rendering for `tool_use` transcript entries.
 //
-// Rather than a raw JSON dump, a tool call reads as a calm activity line:
-// a dimmed, humanised label ("Searching the web ⌄") that expands into a
-// thin-ruled timeline — the call itself (wrench), its parameters tucked behind
-// a quiet pill, and a "Done" marker. Monochrome by design, so a long transcript
-// stays restful. Expansion state persists per session+entry via the collapse
-// store.
+// Consecutive tool calls are rendered as ONE calm activity group: a dimmed,
+// humanised header ("Searching the web ⌄") that expands into a single
+// thin-ruled timeline. Each call is a step on that shared line (a wrench, the
+// humanised label, and its parameters tucked behind a quiet pill); a single
+// "Done" marker closes the whole group. Monochrome by design so a long
+// transcript stays restful. Expansion state persists per session+entry via the
+// collapse store.
 
 import html from "solid-js/html";
 import { escapeHtml } from "./markdown.ts";
@@ -51,6 +52,20 @@ export function humanize(raw: string): string {
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : raw;
 }
 
+// Prefer the structured input; fall back to parsing the (possibly truncated)
+// text, then to the raw text itself.
+function resolveInput(e: TranscriptEntry): unknown {
+  let input: unknown = e.toolInput;
+  if (input === undefined && e.text) {
+    try {
+      input = JSON.parse(e.text);
+    } catch {
+      input = e.text;
+    }
+  }
+  return input;
+}
+
 // Pretty-print parameters as plain, dimmed text (no loud syntax colours).
 function prettyParams(input: unknown): string {
   let s: string;
@@ -69,52 +84,54 @@ function hasParams(input: unknown): boolean {
   return true;
 }
 
-export function ToolCall(props: { e: TranscriptEntry; sid: string }) {
-  const e = props.e;
-  const label = humanize(e.tool ?? "tool");
-
-  // Prefer the structured input; fall back to parsing the (possibly truncated)
-  // text, then to the raw text itself.
-  let input: unknown = e.toolInput;
-  if (input === undefined && e.text) {
-    try {
-      input = JSON.parse(e.text);
-    } catch {
-      input = e.text;
-    }
-  }
+// One step on the shared timeline: the call's wrench + label, and its
+// parameters behind a nested, persisted disclosure.
+function ToolStep(e: TranscriptEntry, label: string, sid: string) {
+  const input = resolveInput(e);
   const params = hasParams(input);
+  const pid = `toolp:${sid}:${e.id}`;
+  return html`
+    <div class="tc-item">
+      <div class="tc-step">
+        <span class="tc-ico" innerHTML=${WRENCH}></span>
+        <span class="tc-step-label">${label}</span>
+      </div>
+      ${params
+        ? html`<div class="tc-params-wrap">
+            <button class="tc-pill" classList=${() => ({ open: isCollapsed(pid) })}
+              onClick=${() => toggleCollapse(pid)}>Parameters</button>
+            ${() =>
+              isCollapsed(pid)
+                ? html`<pre class="tc-params"><code innerHTML=${prettyParams(input)}></code></pre>`
+                : ""}
+          </div>`
+        : ""}
+    </div>
+  `;
+}
 
-  // Two independent, persisted disclosures: the whole activity, and (nested)
-  // the raw parameters. Namespaced per session so reused entry ids don't bleed.
-  // Presence in the collapse set means "open" (default: closed → calm one-liner).
-  const oid = `tool:${props.sid}:${e.id}`;
-  const pid = `toolp:${props.sid}:${e.id}`;
+// A run of consecutive tool calls, drawn as a single linked timeline with one
+// terminal "Done". `entries` is non-empty.
+export function ToolGroup(props: { entries: TranscriptEntry[]; sid: string }) {
+  const entries = props.entries;
+  const labels = entries.map((e) => humanize(e.tool ?? "tool"));
+  // Header summarises the distinct activities; the full list shows on expand.
+  const header = [...new Set(labels)].join(", ");
+  // Keyed off the first entry — stable while transcript order is. Presence in
+  // the collapse set means "open" (default: closed → a calm one-liner).
+  const gid = `toolgroup:${props.sid}:${entries[0].id}`;
 
   return html`
     <div class="tool-call">
-      <button class="tc-toggle" classList=${() => ({ open: isCollapsed(oid) })}
-        onClick=${() => toggleCollapse(oid)}>
-        <span class="tc-label">${label}</span>
+      <button class="tc-toggle" classList=${() => ({ open: isCollapsed(gid) })}
+        onClick=${() => toggleCollapse(gid)}>
+        <span class="tc-label">${header}</span>
         <span class="tc-chevron">⌄</span>
       </button>
       ${() =>
-        isCollapsed(oid)
+        isCollapsed(gid)
           ? html`<div class="tc-body">
-              <div class="tc-step">
-                <span class="tc-ico" innerHTML=${WRENCH}></span>
-                <span class="tc-step-label">${label}</span>
-              </div>
-              ${params
-                ? html`<div class="tc-params-wrap">
-                    <button class="tc-pill" classList=${() => ({ open: isCollapsed(pid) })}
-                      onClick=${() => toggleCollapse(pid)}>Parameters</button>
-                    ${() =>
-                      isCollapsed(pid)
-                        ? html`<pre class="tc-params"><code innerHTML=${prettyParams(input)}></code></pre>`
-                        : ""}
-                  </div>`
-                : ""}
+              ${entries.map((e, i) => ToolStep(e, labels[i], props.sid))}
               <div class="tc-step tc-done">
                 <span class="tc-ico" innerHTML=${CHECK}></span>
                 <span class="tc-step-label">Done</span>

@@ -134,11 +134,46 @@ export async function loadOne(id: string): Promise<SessionSnapshot | null> {
   return data ? fromRow(data as Row) : null;
 }
 
+// Set once we detect the task_id column is missing, so we don't re-attempt (and
+// re-warn) on every save until the migration (db/migrations/0001) is applied.
+let taskIdColumnMissing = false;
+
+// True when an upsert failed specifically because the task_id column doesn't
+// exist yet. PostgREST surfaces this as code 42703 / PGRST204 mentioning the
+// column by name.
+function isMissingTaskIdColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const msg = error.message ?? "";
+  return (
+    (error.code === "42703" || error.code === "PGRST204") && /task_id/.test(msg)
+  );
+}
+
 export async function save(s: SessionSnapshot): Promise<void> {
-  const { error } = await db()
-    .from(TABLE)
-    .upsert({ ...toRow(s), updated_at: new Date().toISOString() }, { onConflict: "id" });
-  if (error) console.error("persistence.save:", error.message);
+  const row = { ...toRow(s), updated_at: new Date().toISOString() };
+  // Until the migration lands, skip the column entirely (we already know it's
+  // missing) so the rest of the session still persists.
+  if (taskIdColumnMissing) delete (row as Partial<typeof row>).task_id;
+
+  const { error } = await db().from(TABLE).upsert(row, { onConflict: "id" });
+  if (!error) return;
+
+  if (!taskIdColumnMissing && isMissingTaskIdColumn(error)) {
+    // First time we hit it: remember, warn once, and retry without task_id so
+    // the session is not lost. Run db/migrations/0001_add_session_task_id.sql to
+    // enable task linking.
+    taskIdColumnMissing = true;
+    console.warn(
+      "persistence.save: sessions.task_id column is missing — sessions will " +
+        "persist without their task link until db/migrations/0001_add_session_task_id.sql is applied.",
+    );
+    delete (row as Partial<typeof row>).task_id;
+    const retry = await db().from(TABLE).upsert(row, { onConflict: "id" });
+    if (retry.error) console.error("persistence.save:", retry.error.message);
+    return;
+  }
+
+  console.error("persistence.save:", error.message);
 }
 
 export async function remove(id: string): Promise<void> {

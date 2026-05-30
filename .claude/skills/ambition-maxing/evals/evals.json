@@ -1,0 +1,26 @@
+{
+  "skill_name": "ambition-maxing",
+  "evals": [
+    {
+      "id": 0,
+      "name": "newsletter",
+      "prompt": "ambition max this over 4 passes: I want to start a small newsletter about the local restaurants in my town",
+      "expected_output": "A final plan markedly more ambitious than a sober first draft, plus a visible escalation trajectory across the 4 passes. Should stay coherent, not just pile on superlatives.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "okr-tool",
+      "prompt": "make this plan way more ambitious, give it 3 rounds: build a small internal tool to track our engineering team's OKRs",
+      "expected_output": "Final plan escalated over 3 passes with bigger scope/impact, trajectory shown, still a real plan a team could pursue.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "hackathon",
+      "prompt": "10x this idea: a weekend hackathon for my company's 20 engineers",
+      "expected_output": "Initial grounded plan amplified (default 3 passes since N unspecified) into something an order of magnitude bigger, with trajectory and an offer to dial back.",
+      "files": []
+    }
+  ]
+}

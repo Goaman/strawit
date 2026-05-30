@@ -12,8 +12,35 @@ import type { PmState, Project, Task, TaskStatus } from "../types.ts";
 
 const API = "/api/pm";
 
+// Remember the last project the user opened across reloads. Reads/writes a
+// single localStorage key; guarded so it degrades gracefully where storage is
+// unavailable (private mode, SSR, etc.).
+const SELECTED_PROJECT_KEY = "pm.selectedProjectId";
+
+function readStoredProjectId(): string | null {
+  try {
+    return localStorage.getItem(SELECTED_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
 const [pmState, setPmState] = createSignal<PmState>({ projects: [], tasks: [] });
-const [selectedProjectId, setSelectedProjectId] = createSignal<string | null>(null);
+const [selectedProjectId, setSelectedProjectIdRaw] = createSignal<string | null>(
+  readStoredProjectId(),
+);
+
+// Persisting wrapper: keep localStorage in sync with the selected project so a
+// reload lands the user back on the same board.
+function setSelectedProjectId(id: string | null) {
+  setSelectedProjectIdRaw(id);
+  try {
+    if (id) localStorage.setItem(SELECTED_PROJECT_KEY, id);
+    else localStorage.removeItem(SELECTED_PROJECT_KEY);
+  } catch {
+    // ignore storage failures
+  }
+}
 const [showProjectForm, setShowProjectForm] = createSignal(false);
 const [editingProject, setEditingProject] = createSignal(false);
 const [showTaskForm, setShowTaskForm] = createSignal(false);
@@ -41,6 +68,11 @@ async function refresh() {
     if (r.ok) {
       setPmState(await r.json());
       setPmError(null);
+      // Drop a restored selection that no longer points at a real project.
+      const current = selectedProjectId();
+      if (current && !pmState().projects.some((p) => p.id === current)) {
+        setSelectedProjectId(null);
+      }
     } else {
       setPmError(await errorOf(r, "Failed to load board"));
     }

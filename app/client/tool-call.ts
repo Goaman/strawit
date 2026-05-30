@@ -1,171 +1,77 @@
 // Rich rendering for `tool_use` transcript entries.
 //
-// Instead of dumping a raw (truncated) JSON blob, each tool call becomes a
-// compact card: a category-coloured icon, a human-readable title, an inline
-// one-line summary of the key argument, and an expandable, syntax-highlighted
-// view of the full parameters. Expansion state is persisted per session+entry
-// via the shared collapse store.
+// Rather than a raw JSON dump, a tool call reads as a calm activity line:
+// a dimmed, humanised label ("Searching the web ⌄") that expands into a
+// thin-ruled timeline — the call itself (wrench), its parameters tucked behind
+// a quiet pill, and a "Done" marker. Monochrome by design, so a long transcript
+// stays restful. Expansion state persists per session+entry via the collapse
+// store.
 
 import html from "solid-js/html";
 import { escapeHtml } from "./markdown.ts";
 import { isCollapsed, toggleCollapse } from "./collapse.ts";
 import type { TranscriptEntry } from "../types.ts";
 
-// ---- tool identity → icon / title / category --------------------------------
+// Thin line icons (Lucide), kept monochrome via currentColor to match the
+// understated aesthetic — emoji would read as chunky/loud here.
+const ICON_ATTRS =
+  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"';
+const WRENCH = `<svg ${ICON_ATTRS}><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>`;
+const CHECK = `<svg ${ICON_ATTRS}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>`;
 
-type Cat = "exec" | "file" | "search" | "skill" | "mcp" | "agent" | "web" | "todo" | "default";
-
-interface ToolMeta {
-  icon: string;
-  title: string; // primary label (the tool, prettified)
-  subtitle?: string; // secondary context (e.g. the MCP server)
-  badge?: string; // small uppercase tag (e.g. "MCP", "SKILL")
-  cat: Cat;
-}
-
-// Per-known-tool overrides. Anything not listed falls back to a sensible guess
-// (including the `mcp__server__name` convention).
-const KNOWN: Record<string, { icon: string; cat: Cat; title?: string }> = {
-  Bash: { icon: "⌘", cat: "exec" },
-  BashOutput: { icon: "📤", cat: "exec" },
-  KillShell: { icon: "🛑", cat: "exec" },
-  Read: { icon: "📄", cat: "file" },
-  Write: { icon: "✏️", cat: "file" },
-  Edit: { icon: "📝", cat: "file" },
-  MultiEdit: { icon: "📝", cat: "file" },
-  NotebookEdit: { icon: "📓", cat: "file" },
-  Glob: { icon: "🗂️", cat: "file" },
-  Grep: { icon: "🔎", cat: "search" },
-  ToolSearch: { icon: "🔍", cat: "search" },
-  WebSearch: { icon: "🌐", cat: "search" },
-  WebFetch: { icon: "🌐", cat: "web" },
-  Skill: { icon: "🧩", cat: "skill" },
-  Task: { icon: "🤖", cat: "agent" },
-  Agent: { icon: "🤖", cat: "agent" },
-  TodoWrite: { icon: "✅", cat: "todo" },
-  ExitPlanMode: { icon: "📋", cat: "default" },
+// Humanise a tool name into a calm activity label.
+const LABELS: Record<string, string> = {
+  Bash: "Running a command",
+  BashOutput: "Reading command output",
+  KillShell: "Stopping a command",
+  Read: "Reading a file",
+  Write: "Writing a file",
+  Edit: "Editing a file",
+  MultiEdit: "Editing a file",
+  NotebookEdit: "Editing a notebook",
+  Glob: "Finding files",
+  Grep: "Searching the code",
+  ToolSearch: "Looking up tools",
+  WebSearch: "Searching the web",
+  WebFetch: "Fetching a page",
+  Skill: "Using a skill",
+  Task: "Delegating to an agent",
+  Agent: "Delegating to an agent",
+  TodoWrite: "Updating the plan",
+  ExitPlanMode: "Finishing the plan",
 };
 
-function titleCase(s: string): string {
-  return s.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+export function humanize(raw: string): string {
+  if (!raw) return "Working";
+  if (LABELS[raw]) return LABELS[raw];
+  // mcp__server__some_tool → "Some tool"
+  const mcp = raw.match(/^mcp__[^_]+(?:_[^_]+)*?__(.+)$/);
+  const name = mcp ? mcp[1] : raw;
+  const words = name.replace(/[_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : raw;
 }
 
-export function toolMeta(tool: string): ToolMeta {
-  const name = tool || "tool";
-
-  // MCP tools follow `mcp__<server>__<tool>`.
-  const mcp = name.match(/^mcp__([^_]+(?:_[^_]+)*?)__(.+)$/);
-  if (mcp) {
-    return {
-      icon: "🔌",
-      title: titleCase(mcp[2]),
-      subtitle: mcp[1],
-      badge: "MCP",
-      cat: "mcp",
-    };
+// Pretty-print parameters as plain, dimmed text (no loud syntax colours).
+function prettyParams(input: unknown): string {
+  let s: string;
+  try {
+    s = typeof input === "string" ? input : (JSON.stringify(input, null, 2) ?? String(input));
+  } catch {
+    s = String(input);
   }
-
-  const known = KNOWN[name];
-  if (known) {
-    return {
-      icon: known.icon,
-      title: known.title ?? name,
-      badge: known.cat === "skill" ? "SKILL" : undefined,
-      cat: known.cat,
-    };
-  }
-
-  return { icon: "🔧", title: name, cat: "default" };
+  return escapeHtml(s);
 }
 
-// ---- one-line summary of the most meaningful argument -----------------------
-
-function firstString(input: Record<string, unknown>): string | undefined {
-  for (const v of Object.values(input)) {
-    if (typeof v === "string" && v.trim()) return v;
-  }
-  return undefined;
-}
-
-// Pick the field that best describes the call, per tool. Falls back to the first
-// stringy field, then a compact JSON rendering.
-function summarize(tool: string, input: unknown): string {
-  if (input == null) return "";
-  if (typeof input === "string") return input;
-  if (typeof input !== "object") return String(input);
-
-  const o = input as Record<string, unknown>;
-  const s = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : undefined);
-
-  const mcp = tool.match(/^mcp__/);
-  let pick: string | undefined;
-
-  if (tool === "Bash") pick = s("command") ?? s("description");
-  else if (tool === "Read" || tool === "Write" || tool === "Edit" || tool === "MultiEdit")
-    pick = s("file_path") ?? s("notebook_path");
-  else if (tool === "Glob") pick = s("pattern") ? `${s("pattern")}${s("path") ? ` in ${s("path")}` : ""}` : undefined;
-  else if (tool === "Grep") pick = s("pattern");
-  else if (tool === "ToolSearch" || tool === "WebSearch") pick = s("query");
-  else if (tool === "WebFetch") pick = s("url") ?? s("prompt");
-  else if (tool === "Skill") pick = [s("skill"), s("args")].filter(Boolean).join(" — ");
-  else if (tool === "Task" || tool === "Agent") pick = s("description") ?? s("prompt");
-  else if (mcp) pick = s("prompt") ?? s("query") ?? s("description");
-  else if (tool === "TodoWrite" && Array.isArray(o.todos)) pick = `${o.todos.length} todo(s)`;
-
-  if (!pick) pick = firstString(o);
-  if (!pick) {
-    try {
-      pick = JSON.stringify(o);
-    } catch {
-      pick = String(o);
-    }
-  }
-  return pick.replace(/\s+/g, " ").trim();
-}
-
-// Whether there is anything worth expanding (a non-trivial object/string).
-function hasDetail(input: unknown): boolean {
+function hasParams(input: unknown): boolean {
   if (input == null) return false;
-  if (typeof input === "string") return input.length > 0;
+  if (typeof input === "string") return input.trim().length > 0;
   if (typeof input === "object") return Object.keys(input as object).length > 0;
   return true;
 }
 
-// ---- pretty + lightly syntax-highlighted JSON -------------------------------
-
-export function highlightJson(value: unknown): string {
-  let json: string;
-  try {
-    json = typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? String(value));
-  } catch {
-    json = String(value);
-  }
-  // Scan the raw JSON, escaping the gaps and each matched token so embedded
-  // < > & in strings stay literal. Tokens: strings (optionally a key, when a
-  // colon follows), numbers, and the keywords true/false/null.
-  const re = /"(?:\\.|[^"\\])*"(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
-  let out = "";
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(json))) {
-    out += escapeHtml(json.slice(last, m.index));
-    const tok = m[0];
-    let cls = "tc-num";
-    if (tok[0] === '"') cls = m[1] ? "tc-key" : "tc-str";
-    else if (tok === "true" || tok === "false") cls = "tc-bool";
-    else if (tok === "null") cls = "tc-null";
-    out += `<span class="${cls}">${escapeHtml(tok)}</span>`;
-    last = m.index + tok.length;
-  }
-  out += escapeHtml(json.slice(last));
-  return out;
-}
-
-// ---- the widget -------------------------------------------------------------
-
 export function ToolCall(props: { e: TranscriptEntry; sid: string }) {
   const e = props.e;
-  const meta = toolMeta(e.tool ?? "tool");
+  const label = humanize(e.tool ?? "tool");
 
   // Prefer the structured input; fall back to parsing the (possibly truncated)
   // text, then to the raw text itself.
@@ -177,29 +83,43 @@ export function ToolCall(props: { e: TranscriptEntry; sid: string }) {
       input = e.text;
     }
   }
+  const params = hasParams(input);
 
-  const summary = summarize(e.tool ?? "", input);
-  const expandable = hasDetail(input);
-  // Persisted, namespaced per session so entry-id reuse across sessions doesn't
-  // bleed. Presence in the collapse set means "open" here (default: closed).
-  const cid = `tool:${props.sid}:${e.id}`;
+  // Two independent, persisted disclosures: the whole activity, and (nested)
+  // the raw parameters. Namespaced per session so reused entry ids don't bleed.
+  // Presence in the collapse set means "open" (default: closed → calm one-liner).
+  const oid = `tool:${props.sid}:${e.id}`;
+  const pid = `toolp:${props.sid}:${e.id}`;
 
   return html`
-    <div class=${`tool-call tc-${meta.cat}`} classList=${() => ({ open: expandable && isCollapsed(cid) })}>
-      <div class=${expandable ? "tc-head clickable" : "tc-head"}
-        onClick=${() => expandable && toggleCollapse(cid)}>
-        <span class="tc-icon">${meta.icon}</span>
-        <span class="tc-title">${meta.title}</span>
-        ${meta.subtitle ? html`<span class="tc-sub">${meta.subtitle}</span>` : ""}
-        ${meta.badge ? html`<span class="tc-badge">${meta.badge}</span>` : ""}
-        ${summary ? html`<span class="tc-summary">${summary}</span>` : ""}
-        ${expandable
-          ? html`<span class="caret tc-caret" classList=${() => ({ collapsed: !isCollapsed(cid) })}>▾</span>`
-          : ""}
-      </div>
+    <div class="tool-call">
+      <button class="tc-toggle" classList=${() => ({ open: isCollapsed(oid) })}
+        onClick=${() => toggleCollapse(oid)}>
+        <span class="tc-label">${label}</span>
+        <span class="tc-chevron">⌄</span>
+      </button>
       ${() =>
-        expandable && isCollapsed(cid)
-          ? html`<pre class="tc-params"><code innerHTML=${highlightJson(input)}></code></pre>`
+        isCollapsed(oid)
+          ? html`<div class="tc-body">
+              <div class="tc-step">
+                <span class="tc-ico" innerHTML=${WRENCH}></span>
+                <span class="tc-step-label">${label}</span>
+              </div>
+              ${params
+                ? html`<div class="tc-params-wrap">
+                    <button class="tc-pill" classList=${() => ({ open: isCollapsed(pid) })}
+                      onClick=${() => toggleCollapse(pid)}>Parameters</button>
+                    ${() =>
+                      isCollapsed(pid)
+                        ? html`<pre class="tc-params"><code innerHTML=${prettyParams(input)}></code></pre>`
+                        : ""}
+                  </div>`
+                : ""}
+              <div class="tc-step tc-done">
+                <span class="tc-ico" innerHTML=${CHECK}></span>
+                <span class="tc-step-label">Done</span>
+              </div>
+            </div>`
           : ""}
     </div>
   `;

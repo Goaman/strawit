@@ -259,15 +259,18 @@ button.danger:hover { border-color: #ff7a8a; }
 .tc-ico { flex: none; width: 17px; height: 17px; color: var(--dim); display: inline-flex; }
 .tc-ico svg { width: 100%; height: 100%; display: block; }
 
-.tc-params-wrap { margin-left: 27px; display: flex; flex-direction: column; gap: 7px; align-items: flex-start; }
-.tc-pill {
-  background: none; border: 1px solid var(--border); border-radius: 7px;
-  color: var(--dim); font: inherit; font-size: 12.5px; padding: 2px 11px; cursor: pointer;
+/* subtle, right-aligned parameters toggle */
+.tc-params-btn {
+  margin-left: auto; flex: none;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: none; padding: 2px 2px; cursor: pointer;
+  color: #565d6f; font: inherit; font-size: 12.5px; transition: color .12s ease;
 }
-.tc-pill:hover { color: var(--text); border-color: var(--dim); }
-.tc-pill.open { color: var(--text); }
+.tc-params-btn:hover, .tc-params-btn.open { color: var(--dim); border: none; }
+.tc-params-ico { width: 13px; height: 13px; display: inline-flex; opacity: .85; }
+.tc-params-ico svg { width: 100%; height: 100%; display: block; }
 .tc-params {
-  margin: 0; padding: 9px 12px; max-width: 100%;
+  margin: 2px 0 2px 27px; padding: 9px 12px; max-width: calc(100% - 27px);
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   overflow-x: auto;
 }

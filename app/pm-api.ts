@@ -17,6 +17,7 @@ import {
   updateTask,
 } from "./pm-store.ts";
 import { gatewayConfigured, gatewayConfigError } from "./linear-gateway.ts";
+import { ensureTaskWorktree } from "./worktree.ts";
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -71,6 +72,21 @@ export async function handlePmRequest(req: Request, url: URL): Promise<Response 
     }
 
     if (collection === "tasks") {
+      // POST /api/pm/tasks/<id>/worktree — ensure an isolated git worktree for
+      // the task and return where it lives, so the client can start an agent
+      // session whose cwd is that worktree.
+      if (resourceId && seg[2] === "worktree") {
+        if (method !== "POST") return json({ error: "method not allowed" }, 405);
+        const { tasks } = await getState();
+        const task = tasks.find((t) => t.id === resourceId);
+        if (!task) return json({ error: "task not found" }, 404);
+        try {
+          const wt = await ensureTaskWorktree(task);
+          return json({ path: wt.path, branch: wt.branch, project: wt.project });
+        } catch (e) {
+          return json({ error: e instanceof Error ? e.message : String(e) }, 502);
+        }
+      }
       if (!resourceId) {
         if (method === "POST") {
           const payload = await body(req);

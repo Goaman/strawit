@@ -201,6 +201,35 @@ function launchAgentFor(task: Task) {
   setView("agents");
 }
 
+// Create a dedicated git worktree for the task (server-side), then launch an
+// agent whose cwd is that worktree — so it works in isolation from your
+// checkout. Records the worktree's branch on the task and marks it in-progress.
+async function launchAgentInWorktree(task: Task) {
+  setPmBusy(true);
+  try {
+    const r = await fetch(`${API}/tasks/${task.id}/worktree`, { method: "POST" });
+    if (!r.ok) {
+      setPmError(await errorOf(r, "Failed to create worktree"));
+      return;
+    }
+    const { path, branch } = (await r.json()) as { path: string; branch: string };
+    const lines = [
+      `Work on this task: ${task.title}`,
+      task.notes ? `\n${task.notes}` : "",
+      `\nYou are in a dedicated git worktree at ${path} on branch \`${branch}\`. Do the work and commit it here.`,
+    ].filter(Boolean);
+    actions.create({ label: task.title, prompt: lines.join("\n"), cwd: path });
+    setPmError(null);
+    setView("agents");
+    // Best-effort: remember the branch and flag the task as started.
+    void updateTask(task.id, { status: "in_progress", branch });
+  } catch (e) {
+    setPmError(String(e));
+  } finally {
+    setPmBusy(false);
+  }
+}
+
 function TaskCard(task: Task) {
   return html`
     <div class="task-card">
@@ -233,6 +262,8 @@ function TaskCard(task: Task) {
                 <button onClick=${() => setEditingTaskId(task.id)}>edit</button>
                 <button title="launch a console agent in this task's cwd"
                   onClick=${() => launchAgentFor(task)}>▶ agent</button>
+                <button title="create a dedicated git worktree for this task and launch an agent in it"
+                  onClick=${() => launchAgentInWorktree(task)}>⎇ agent</button>
                 <button class="danger"
                   onClick=${() => confirm(`Delete task "${task.title}"?`) && deleteTask(task.id)}>delete</button>
               </div>

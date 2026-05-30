@@ -2,8 +2,9 @@
 // (the repo root, a worktree, the TUI…), so we don't rely on Bun's cwd-only
 // .env auto-load. All of the app's secrets — the Soda Straw / Linear gateway
 // (linear-gateway.ts) and the Supabase session store (persistence.ts) — are
-// read from a single, machine-wide file: ~/.strawit/.env (override with
-// STRAWIT_ENV_FILE).
+// read from a single, machine-wide file: ~/.rave-of-agents/.env (override with
+// RAVE_OF_AGENTS_ENV_FILE). The legacy ~/.strawit/.env path is still read as a
+// fallback so older setups keep working after the rename.
 //
 // Importing this module loads that file as a side effect, once, before anything
 // reads process.env. Only keys that aren't already set are filled in, so an
@@ -17,17 +18,27 @@ import { join } from "node:path";
 
 let loaded = false;
 
-export function loadStrawitEnv(): void {
+export function loadRaveOfAgentsEnv(): void {
   if (loaded) return;
   loaded = true;
 
-  const path = process.env.STRAWIT_ENV_FILE || join(homedir(), ".strawit", ".env");
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    return; // no file there — rely on the ambient environment / cwd .env
+  const candidates = [
+    process.env.RAVE_OF_AGENTS_ENV_FILE,
+    join(homedir(), ".rave-of-agents", ".env"),
+    process.env.STRAWIT_ENV_FILE, // legacy fallback
+    join(homedir(), ".strawit", ".env"), // legacy fallback
+  ].filter(Boolean) as string[];
+
+  let text: string | undefined;
+  for (const path of candidates) {
+    try {
+      text = readFileSync(path, "utf8");
+      break;
+    } catch {
+      // try the next candidate
+    }
   }
+  if (text === undefined) return; // no file found — rely on the ambient environment / cwd .env
 
   for (const raw of text.split("\n")) {
     const line = raw.trim();
@@ -46,4 +57,4 @@ export function loadStrawitEnv(): void {
   }
 }
 
-loadStrawitEnv();
+loadRaveOfAgentsEnv();

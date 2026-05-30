@@ -613,7 +613,7 @@ function TopNav() {
 // localStorage, so it survives reloads.
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 620;
-const SIDEBAR_KEY = "agent-console:sidebar-w";
+const SIDEBAR_KEY = "rave-of-agents:sidebar-w";
 
 function loadSidebarWidth(): number {
   const v = Number(localStorage.getItem(SIDEBAR_KEY));

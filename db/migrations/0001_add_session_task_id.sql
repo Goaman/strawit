@@ -5,7 +5,7 @@
 -- migration (and any future task-less session) still load. See app/types.ts
 -- (SessionMeta.taskId) and app/persistence.ts (Row.task_id).
 --
--- The sessions table lives in the Supabase project agent-console
+-- The sessions table lives in the Supabase project rave-of-agents
 -- (ref ielmaqllavpnmolnlupf). Apply via the Soda Straw `supabase` straw
 -- (apply_migration / execute_sql) or the Supabase SQL editor.
 

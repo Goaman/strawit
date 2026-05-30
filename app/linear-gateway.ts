@@ -3,8 +3,8 @@
 // The board backend never talks to Linear directly — every call is proxied
 // through Soda Straw's MCP gateway with a scoped agent API key (straw: linear).
 // That keeps credentials, scope, and audit in Soda Straw rather than on this
-// box. Config is read from the environment, loaded from ~/.strawit/.env (or
-// STRAWIT_ENV_FILE, or a cwd .env / the ambient env):
+// box. Config is read from the environment, loaded from ~/.rave-of-agents/.env (or
+// RAVE_OF_AGENTS_ENV_FILE, or a cwd .env / the ambient env):
 //
 //   SODA_STRAW_GATEWAY_URL   e.g. https://<workspace>.straw.../mcp
 //   SODA_STRAW_API_KEY       scoped agent key (ssa_...)
@@ -16,7 +16,7 @@
 // inside the JSON `result` field — so we JSON.parse the envelope, then run the
 // inner string through a small Python-literal parser (parsePyLiteral).
 
-// Load ~/.strawit/.env before reading the config constants below (the import
+// Load ~/.rave-of-agents/.env before reading the config constants below (the import
 // runs the loader as a side effect, and imports are evaluated before the module
 // body). See app/env.ts.
 import "./env.ts";
@@ -36,7 +36,7 @@ export function gatewayConfigError(): string {
     !API_KEY && "SODA_STRAW_API_KEY",
     !TEAM_ID && "LINEAR_TEAM_ID",
   ].filter(Boolean);
-  return `Soda Straw gateway not configured — missing ${missing.join(", ")} (set them in ~/.strawit/.env).`;
+  return `Soda Straw gateway not configured — missing ${missing.join(", ")} (set them in ~/.rave-of-agents/.env).`;
 }
 
 // ---- Python-literal parser --------------------------------------------------
@@ -174,7 +174,7 @@ export async function callLinear(
       arguments: {
         straw: STRAW,
         tool_name: toolName,
-        arguments: { _intent: intent || `Strawit board: ${toolName}`, ...args },
+        arguments: { _intent: intent || `Rave of Agents board: ${toolName}`, ...args },
       },
     },
   });

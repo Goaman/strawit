@@ -3,9 +3,9 @@
 // Mapping:
 //   Project        -> Linear project (in team LINEAR_TEAM_ID)
 //   Task           -> Linear issue (project set to its Project)
-//   task.notes     -> issue description (minus the strawit:meta footer)
-//   task.branch    -> stored in the description's strawit:meta footer
-//   task.cwd       -> stored in the description's strawit:meta footer
+//   task.notes     -> issue description (minus the rave-of-agents:meta footer)
+//   task.branch    -> stored in the description's rave-of-agents:meta footer
+//   task.cwd       -> stored in the description's rave-of-agents:meta footer
 //   status todo/in_progress/done -> Linear states Todo / In Progress / Done
 //   status blocked -> a "blocked" label (Linear has no native blocked state)
 //
@@ -44,7 +44,9 @@ function statusFromIssue(issue: any): TaskStatus {
 
 // ---- description <-> notes/branch/cwd/worktree -----------------------------
 
-const META_RE = /\n*<!-- strawit:meta\n([\s\S]*?)\n-->\s*$/;
+// Match both the current `rave-of-agents:meta` footer and the legacy `strawit:meta`
+// one so issues created before the rename still parse.
+const META_RE = /\n*<!-- (?:rave-of-agents|strawit):meta\n([\s\S]*?)\n-->\s*$/;
 
 function buildDescription(notes: string, branch: string, cwd: string, worktree: string): string {
   const meta = [
@@ -54,7 +56,7 @@ function buildDescription(notes: string, branch: string, cwd: string, worktree: 
   ].filter(Boolean);
   const body = (notes ?? "").trim();
   if (meta.length === 0) return body;
-  return (body ? `${body}\n\n` : "") + `<!-- strawit:meta\n${meta.join("\n")}\n-->`;
+  return (body ? `${body}\n\n` : "") + `<!-- rave-of-agents:meta\n${meta.join("\n")}\n-->`;
 }
 
 function parseDescription(desc: string): { notes: string; branch: string; cwd: string; worktree: string } {
@@ -116,7 +118,7 @@ async function ensureBlockedLabel(): Promise<void> {
   const res = await callLinear(
     "list_issue_labels",
     { team: TEAM_ID, limit: 250 },
-    "Strawit board: check for the 'blocked' label",
+    "Rave of Agents board: check for the 'blocked' label",
   );
   const exists = (res.labels ?? []).some(
     (l: any) => String(l.name).toLowerCase() === BLOCKED_LABEL,
@@ -125,7 +127,7 @@ async function ensureBlockedLabel(): Promise<void> {
     await callLinear(
       "create_issue_label",
       { name: BLOCKED_LABEL, color: "#e5484d", teamId: TEAM_ID },
-      "Strawit board: create the 'blocked' label",
+      "Rave of Agents board: create the 'blocked' label",
     );
   }
   blockedLabelReady = true;
@@ -135,8 +137,8 @@ async function ensureBlockedLabel(): Promise<void> {
 
 export async function getState(): Promise<PmState> {
   const [projRes, issRes] = await Promise.all([
-    callLinear("list_projects", { team: TEAM_ID, limit: 50 }, "Strawit board: load projects"),
-    callLinear("list_issues", { team: TEAM_ID, limit: 250 }, "Strawit board: load tasks"),
+    callLinear("list_projects", { team: TEAM_ID, limit: 50 }, "Rave of Agents board: load projects"),
+    callLinear("list_issues", { team: TEAM_ID, limit: 250 }, "Rave of Agents board: load tasks"),
   ]);
 
   const projects = (projRes.projects ?? [])
@@ -164,7 +166,7 @@ export async function createProject(input: { name?: string; description?: string
       description: (input.description ?? "").trim(),
       addTeams: [TEAM_ID],
     },
-    "Strawit board: create a project",
+    "Rave of Agents board: create a project",
   );
   return mapProject(p);
 }
@@ -176,7 +178,7 @@ export async function updateProject(
   const args: Record<string, unknown> = { id: pid };
   if (patch.name !== undefined && patch.name.trim()) args.name = patch.name.trim();
   if (patch.description !== undefined) args.description = patch.description;
-  const p = await callLinear("save_project", args, "Strawit board: update a project");
+  const p = await callLinear("save_project", args, "Rave of Agents board: update a project");
   return mapProject(p);
 }
 
@@ -185,7 +187,7 @@ export async function deleteProject(pid: string): Promise<boolean> {
   await callLinear(
     "save_project",
     { id: pid, state: "canceled" },
-    "Strawit board: delete (cancel) a project",
+    "Rave of Agents board: delete (cancel) a project",
   );
   return true;
 }
@@ -223,7 +225,7 @@ export async function createTask(input: {
     args.state = STATE_NAME[status];
   }
 
-  const issue = await callLinear("save_issue", args, "Strawit board: create a task");
+  const issue = await callLinear("save_issue", args, "Rave of Agents board: create a task");
   return mapIssue(issue);
 }
 
@@ -255,7 +257,7 @@ export async function updateTask(
   // without clobbering other labels (save_issue replaces the whole label set).
   const needsCurrent = touchesDesc || patch.status !== undefined;
   const current = needsCurrent
-    ? await callLinear("get_issue", { id: tid }, "Strawit board: read a task before update")
+    ? await callLinear("get_issue", { id: tid }, "Rave of Agents board: read a task before update")
     : null;
 
   if (touchesDesc) {
@@ -281,7 +283,7 @@ export async function updateTask(
     }
   }
 
-  const issue = await callLinear("save_issue", args, "Strawit board: update a task");
+  const issue = await callLinear("save_issue", args, "Rave of Agents board: update a task");
   return mapIssue(issue);
 }
 
@@ -290,7 +292,7 @@ export async function deleteTask(tid: string): Promise<boolean> {
   await callLinear(
     "save_issue",
     { id: tid, state: "Canceled" },
-    "Strawit board: delete (cancel) a task",
+    "Rave of Agents board: delete (cancel) a task",
   );
   return true;
 }

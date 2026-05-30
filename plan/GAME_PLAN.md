@@ -7,7 +7,7 @@ entirely by the existing live `sessions()` signal over the websocket.
 
 This plan is concrete and self-contained: another engineer can implement it
 without re-exploring. All paths are absolute under the worktree
-`/Users/goaman/.goapower/worktrees/strawit/agent-game`.
+`/Users/goaman/.goapower/worktrees/rave-of-agents/agent-game`.
 
 ---
 
@@ -18,7 +18,7 @@ without re-exploring. All paths are absolute under the worktree
   `client.js` is gitignored and rebuilt every time the server starts. No build step
   beyond `bun run app/server.ts` (default `PORT 4317`).
 - **Routing**: `app/client/store.ts` holds `const [view, setViewRaw] = createSignal<"agents"|"pm">(loadView())`,
-  persisted to localStorage key `"strawit.view"`. Exports `view` and `setView(v)`,
+  persisted to localStorage key `"rave-of-agents.view"`. Exports `view` and `setView(v)`,
   plus a `loadView()` that validates stored values.
 - **Tabs / routing branch**: `app/client/main.ts` `TopNav()` renders
   `tab("agents","Agents")` then `tab("pm","Projects")`. `App()` switches:
@@ -38,7 +38,7 @@ without re-exploring. All paths are absolute under the worktree
   fine for `<img>`/canvas image loading, but ADD a `png` content type for cleanliness.
 - **Gemini keys**: live in `~/.env_ai` (keys `GEMINI_API_KEY` and
   `GOOGLE_GENERATIVE_AI_API_KEY`, both present). NOTE: the app's `app/env.ts` loads
-  `~/.strawit/.env`, NOT `~/.env_ai`. The sprite-generation SCRIPT therefore must read
+  `~/.rave-of-agents/.env`, NOT `~/.env_ai`. The sprite-generation SCRIPT therefore must read
   `~/.env_ai` directly (it does not run inside the server). Model: `gemini-3-pro-image`.
 - **gitignore gotcha**: `.gitignore` contains a blanket `*.png` rule. Committed sprite
   PNGs WILL be ignored unless we add a negation. (See step 6.)
@@ -510,8 +510,8 @@ Idempotent: overwrite on re-run. Log each file + final manifest.
    ```ts
    if (url.pathname === "/api/sprites/regen" && req.method === "POST") {
      // Spawn the generation script out-of-process so the server stays responsive.
-     // Only enable when STRAWIT_ENABLE_SPRITE_REGEN=1 to avoid accidental API spend.
-     if (process.env.STRAWIT_ENABLE_SPRITE_REGEN !== "1")
+     // Only enable when RAVE_OF_AGENTS_ENABLE_SPRITE_REGEN=1 to avoid accidental API spend.
+     if (process.env.RAVE_OF_AGENTS_ENABLE_SPRITE_REGEN !== "1")
        return new Response(JSON.stringify({ error: "disabled" }), { status: 403 });
      Bun.spawn(["bun", "run", join(ROOT, "..", "scripts", "gen-sprites.ts")], { ... });
      return new Response(JSON.stringify({ started: true }), {
@@ -585,7 +585,7 @@ Each step keeps the build green and the app runnable.
   throws — a green start means the bundle compiled.
 - **Tab placement**: open the app; the top nav shows `Agents | Projects | Game`, in
   that order. Clicking `Game` activates it; reload persists it (localStorage
-  `strawit.view` = `"game"`).
+  `rave-of-agents.view` = `"game"`).
 - **Animation**: with at least one live session, a sprite walks around; running
   sessions wander actively, idle ones bob, sub-agents appear as smaller companions
   near their parent with a faint link line, name tags float above, the HUD shows
@@ -603,8 +603,8 @@ Each step keeps the build green and the app runnable.
 
 ## 12. Critical files for implementation
 
-- /Users/goaman/.goapower/worktrees/strawit/agent-game/app/client/game.ts (new)
-- /Users/goaman/.goapower/worktrees/strawit/agent-game/app/client/main.ts (tab + route)
-- /Users/goaman/.goapower/worktrees/strawit/agent-game/app/client/store.ts (view union)
-- /Users/goaman/.goapower/worktrees/strawit/agent-game/scripts/gen-sprites.ts (new)
-- /Users/goaman/.goapower/worktrees/strawit/agent-game/app/public/styles.css (game styles)
+- /Users/goaman/.goapower/worktrees/rave-of-agents/agent-game/app/client/game.ts (new)
+- /Users/goaman/.goapower/worktrees/rave-of-agents/agent-game/app/client/main.ts (tab + route)
+- /Users/goaman/.goapower/worktrees/rave-of-agents/agent-game/app/client/store.ts (view union)
+- /Users/goaman/.goapower/worktrees/rave-of-agents/agent-game/scripts/gen-sprites.ts (new)
+- /Users/goaman/.goapower/worktrees/rave-of-agents/agent-game/app/public/styles.css (game styles)

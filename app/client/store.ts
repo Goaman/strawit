@@ -14,7 +14,7 @@ import type {
 
 // Top-level view: the existing agent console, or the local project board.
 // Persisted to localStorage so the active tab survives a page reload.
-const VIEW_KEY = "strawit.view";
+const VIEW_KEY = "rave-of-agents.view";
 function loadView(): "agents" | "pm" | "game" {
   try {
     const v = localStorage.getItem(VIEW_KEY);
@@ -60,8 +60,8 @@ export function taskById(id: string | null | undefined): Task | undefined {
 }
 // The selected session id and focused sub-agent are persisted to localStorage
 // so the active conversation survives a page reload.
-const SELECTED_KEY = "strawit.selectedId";
-const SELECTED_SUB_KEY = "strawit.selectedSubKey";
+const SELECTED_KEY = "rave-of-agents.selectedId";
+const SELECTED_SUB_KEY = "rave-of-agents.selectedSubKey";
 function loadStored(key: string): string | null {
   try {
     return localStorage.getItem(key);

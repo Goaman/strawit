@@ -4,7 +4,7 @@
 
 import { createSignal } from "solid-js";
 
-const KEY = "agent-console:collapsed";
+const KEY = "rave-of-agents:collapsed";
 
 function load(): Set<string> {
   try {

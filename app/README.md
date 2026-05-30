@@ -20,13 +20,13 @@ it returned).
 
 ```bash
 bun install                       # first time only
-mkdir -p ~/.strawit                # all secrets live in ~/.strawit/.env
-cp .env.example ~/.strawit/.env    # then fill it in (Supabase + Linear creds)
+mkdir -p ~/.rave-of-agents                # all secrets live in ~/.rave-of-agents/.env
+cp .env.example ~/.rave-of-agents/.env    # then fill it in (Supabase + Linear creds)
 bun run start                      # web UI  → http://localhost:4317
 bun run tui                        # terminal UI (same backend; embeds a server if none is up)
 ```
 
-All credentials load from **`~/.strawit/.env`** (override with `STRAWIT_ENV_FILE`)
+All credentials load from **`~/.rave-of-agents/.env`** (override with `RAVE_OF_AGENTS_ENV_FILE`)
 so the server runs from any directory; a cwd `.env` or exported env vars still
 take precedence. See `app/env.ts`.
 
@@ -46,7 +46,7 @@ to message the running agent. The TUI: `j/k` select · `n` new · `m` message ·
 Each session runs in its own **detached worker process** (`session-worker.ts`)
 that owns the long-lived `query()` and the `claude` subprocess it drives. The
 web server is just a *supervisor*: it spawns workers, connects to their unix
-sockets (`~/.agent-console/workers/<id>.sock`), and relays their events to the
+sockets (`~/.rave-of-agents/workers/<id>.sock`), and relays their events to the
 UI. Because the workers are detached, **stopping the server does not kill the
 agents** — they keep running idle between turns. When the server starts again it
 scans for live worker sockets and **re-attaches** to the running agents: a
@@ -56,7 +56,7 @@ Metadata, transcript and sub-agent tree are saved to **Supabase** (set
 `SUPABASE_URL` + `SUPABASE_KEY`, see `.env.example`) so sessions are durable and
 not tied to one machine. Host-local runtime files — worker sockets/pids and the
 per-session log tailed by the super-agent tree — still live under
-`~/.agent-console/` (override with `AGENT_CONSOLE_DIR`), since they can't be
+`~/.rave-of-agents/` (override with `RAVE_OF_AGENTS_DIR`), since they can't be
 shared across hosts. A session whose worker has exited (you `close`d it, or its
 turn ended and you quit) is **dormant**; sending it a message spawns a fresh
 worker that **resumes** the prior SDK session (same id, same context). `delete`
@@ -74,8 +74,8 @@ The **Projects** tab is a project board mapped onto Linear: a **Project** is a
 Linear project and a **Task** is a Linear issue, all under one Linear team. The
 server never talks to Linear directly — every read/write is proxied through the
 **Soda Straw gateway** with a scoped agent API key, so credentials, scope, and
-audit stay in Soda Straw. Credentials load from **`~/.strawit/.env`** (override
-with `STRAWIT_ENV_FILE`) so the server works from any directory; a `.env` in the
+audit stay in Soda Straw. Credentials load from **`~/.rave-of-agents/.env`** (override
+with `RAVE_OF_AGENTS_ENV_FILE`) so the server works from any directory; a `.env` in the
 cwd or the ambient environment also works and takes precedence:
 
 ```bash
@@ -87,7 +87,7 @@ SODA_STRAW_LINEAR_STRAW=linear      # straw name (optional, default "linear")
 
 Mapping details:
 - `task.notes` ⇄ the issue description; `branch`/`cwd` are stored in a
-  `<!-- strawit:meta ... -->` footer appended to the description.
+  `<!-- rave-of-agents:meta ... -->` footer appended to the description.
 - statuses `todo`/`in_progress`/`done` ⇄ Linear states **Todo**/**In Progress**/
   **Done**; `blocked` is a **`blocked` label** (Linear has no blocked state),
   auto-created on first use.

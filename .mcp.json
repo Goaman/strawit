@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "node",
       "args": [
-        "/Volumes/Goadrive/perso/repos/strawit/.claude/skills/super-agent/server.mjs"
+        "/Volumes/Goadrive/perso/repos/rave-of-agents/.claude/skills/super-agent/server.mjs"
       ]
     }
   }

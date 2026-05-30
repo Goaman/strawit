@@ -67,7 +67,7 @@ const SUPER_AGENT_SERVER =
   process.env.SUPER_AGENT_SERVER ||
   [
     join(REPO_ROOT, ".claude/skills/super-agent/server.mjs"),
-    "/Volumes/Goadrive/perso/repos/strawit/.claude/skills/super-agent/server.mjs",
+    "/Volumes/Goadrive/perso/repos/rave-of-agents/.claude/skills/super-agent/server.mjs",
   ].find((p) => existsSync(p));
 const NODE_BIN = process.env.NODE_BIN || Bun.which("node") || "node";
 const MAX_DEPTH = process.env.SUPER_AGENT_MAX_DEPTH || "5";

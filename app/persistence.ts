@@ -3,7 +3,7 @@
 // Worker runtime files (unix sockets, pid files, stdout capture) and per-session
 // logs stay on local disk — they're inherently host-local and can't be shared.
 
-// Load credentials (SUPABASE_URL/KEY) from ~/.strawit/.env before db() reads
+// Load credentials (SUPABASE_URL/KEY) from ~/.rave-of-agents/.env before db() reads
 // them. See app/env.ts — a single shared file holds all the app's secrets.
 import "./env.ts";
 import { mkdirSync } from "node:fs";
@@ -13,7 +13,10 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { SessionSnapshot } from "./types.ts";
 
 // Local-only runtime/log directory (NOT session storage — see Supabase below).
-export const DATA_DIR = process.env.AGENT_CONSOLE_DIR || join(homedir(), ".agent-console");
+export const DATA_DIR =
+  process.env.RAVE_OF_AGENTS_DIR ||
+  process.env.AGENT_CONSOLE_DIR || // legacy env var
+  join(homedir(), ".rave-of-agents");
 export const LOG_DIR = join(DATA_DIR, "logs");
 // Per-session worker runtime files: the unix socket the worker listens on, its
 // pid file, and its stdout/stderr capture. These let a restarted server find
@@ -52,7 +55,7 @@ function db(): SupabaseClient {
   const key = process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !key) {
     throw new Error(
-      "Supabase is not configured: set SUPABASE_URL and SUPABASE_KEY in ~/.strawit/.env " +
+      "Supabase is not configured: set SUPABASE_URL and SUPABASE_KEY in ~/.rave-of-agents/.env " +
         "(see .env.example). Sessions are stored in Supabase, so the app cannot start without them.",
     );
   }

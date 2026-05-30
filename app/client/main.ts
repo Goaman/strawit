@@ -3,7 +3,7 @@
 
 import { render } from "solid-js/web";
 import html from "solid-js/html";
-import { createEffect, createSignal } from "solid-js";
+import { createEffect, createMemo, createSignal } from "solid-js";
 import {
   actions,
   board,
@@ -113,38 +113,62 @@ function SubTreeImpl(nodes: SubAgentNode[], parent: string | null, sessionId: st
 // Focused view of a single sub-agent: the prompt it was given, any agents it
 // spawned, and the answer it returned. (Sub-agents run headless/one-shot, so
 // this is the full conversation available for them — input, lineage, output.)
-function SubAgentDetail(node: SubAgentNode, session: SessionSnapshot) {
+//
+// Takes accessors rather than plain values so the detail updates in place as
+// the live node/session change, without the caller having to tear down and
+// rebuild the whole view on every event.
+function SubAgentDetail(
+  nodeAcc: () => SubAgentNode | undefined,
+  sessionAcc: () => SessionSnapshot | undefined,
+) {
   return html`
     <div class="sub-detail">
       <header class="conv-head">
         <div>
-          <button class="back" onClick=${() => selectSession(session.id)}>← ${session.label}</button>
-          <span class="badge ${node.status}">${STATUS_LABEL[node.status] ?? node.status}</span>
-          <span class="sub-meta">L${node.depth} · ${node.model ?? "default"}${node.pid ? ` · pid ${node.pid}` : ""}</span>
+          <button class="back"
+            onClick=${() => {
+              const s = sessionAcc();
+              if (s) selectSession(s.id);
+            }}>← ${() => sessionAcc()?.label ?? ""}</button>
+          ${() => {
+            const n = nodeAcc();
+            return n ? html`<span class="badge ${n.status}">${STATUS_LABEL[n.status] ?? n.status}</span>` : "";
+          }}
+          <span class="sub-meta">${() => {
+            const n = nodeAcc();
+            return n ? `L${n.depth} · ${n.model ?? "default"}${n.pid ? ` · pid ${n.pid}` : ""}` : "";
+          }}</span>
         </div>
       </header>
       <div class="transcript">
         <div class="entry user">
           <span class="who">spawned with</span>
-          <div class="text">${node.prompt || "(no prompt)"}</div>
+          <div class="text">${() => nodeAcc()?.prompt || "(no prompt)"}</div>
         </div>
-        ${() =>
-          session.subAgents.some((c) => c.parentKey === node.key)
+        ${() => {
+          const n = nodeAcc();
+          const s = sessionAcc();
+          if (!n || !s) return "";
+          return s.subAgents.some((c) => c.parentKey === n.key)
             ? html`<div class="entry system">
                 <span class="who">spawned sub-agents</span>
-                <div class="text">${SubTreeImpl(session.subAgents, node.key, session.id)}</div>
+                <div class="text">${SubTreeImpl(s.subAgents, n.key, s.id)}</div>
               </div>`
-            : ""}
-        ${() =>
-          node.status === "done" || node.status === "error"
-            ? html`<div class="entry ${node.status === "error" ? "error" : "result"}">
+            : "";
+        }}
+        ${() => {
+          const n = nodeAcc();
+          if (!n) return "";
+          return n.status === "done" || n.status === "error"
+            ? html`<div class="entry ${n.status === "error" ? "error" : "result"}">
                 <span class="who">returned</span>
-                <div class="text">${node.result ?? node.resultPreview ?? "(no result)"}</div>
+                <div class="text">${n.result ?? n.resultPreview ?? "(no result)"}</div>
               </div>`
             : html`<div class="entry system">
-                <span class="who">${node.status}</span>
+                <span class="who">${n.status}</span>
                 <div class="text">working…</div>
-              </div>`}
+              </div>`;
+        }}
       </div>
     </div>
   `;
@@ -376,82 +400,127 @@ function Conversation() {
     }
   };
 
+  // The focused sub-agent (if any) for the selected session, tracked reactively.
+  const focusedSub = (): SubAgentNode | undefined => {
+    const key = selectedSubKey();
+    if (!key) return undefined;
+    return selected()?.subAgents.find((n) => n.key === key);
+  };
+
+  // Which top-level layout to show. A *memo* (not a raw accessor) so that the
+  // steady stream of session/transcript updates — every one of which produces a
+  // fresh `selected()` object reference — only re-runs the outer branch when the
+  // layout actually changes. Without this, an incoming event would tear down and
+  // rebuild the whole conversation subtree, recreating the composer <textarea>
+  // and wiping whatever the user was typing. This is the crux of the fine-grained
+  // reactivity fix.
+  const mode = createMemo<"none" | "sub" | "conv">(() => {
+    if (!selected()) return "none";
+    return focusedSub() ? "sub" : "conv";
+  });
+
+  // Clear the draft + attachments when the user switches to a *different*
+  // session (matching the previous tear-down behaviour), but NOT when events
+  // arrive for the current one — those must leave the in-progress message alone.
+  let lastId: string | null = null;
+  createEffect(() => {
+    const id = selectedId();
+    if (id !== lastId) {
+      lastId = id;
+      if (composer) composer.value = "";
+      picker.clear();
+    }
+  });
+
+  // The conversation shell. Built once while `mode` stays "conv"; the header,
+  // sub-agent panel and transcript update through their own leaf accessors,
+  // and the composer <textarea> is never recreated — so input survives events.
+  const conversation = () => html`
+    <header class="conv-head">
+      <div>
+        <strong>${() => selected()?.label ?? ""}</strong>
+        ${() => {
+          const s = selected();
+          return s ? html`<span class="badge ${s.status}">${STATUS_LABEL[s.status] ?? s.status}</span>` : "";
+        }}
+        ${() => {
+          const s = selected();
+          return s && !s.live ? html`<span class="badge dormant">dormant</span>` : "";
+        }}
+      </div>
+      <div class="head-actions">
+        ${() => {
+          const s = selected();
+          if (!s || !s.live) return "";
+          return html`<button onClick=${() => actions.interrupt(s.id)} disabled=${() => !selected()?.busy}>interrupt</button>
+                 <button onClick=${() => actions.close(s.id)}>close</button>`;
+        }}
+        <button class="danger"
+          onClick=${() => {
+            const s = selected();
+            if (s && confirm(`Delete "${s.label}" permanently?`)) actions.remove(s.id);
+          }}>delete</button>
+      </div>
+    </header>
+
+    ${() => {
+      const s = selected();
+      if (!s || !s.subAgents.length) return "";
+      const pid = `subpanel:${s.id}`;
+      return html`<div class="subagents-panel">
+        <div class="panel-title clickable" onClick=${() => toggleCollapse(pid)}>
+          <span class="caret" classList=${() => ({ collapsed: isCollapsed(pid) })}>▾</span>
+          🌿 sub-agent tree (${s.subAgents.length}) —
+          ${() => (isCollapsed(pid) ? "click to expand" : "click a node to open it")}
+        </div>
+        ${() => (isCollapsed(pid) ? "" : SubTreeImpl(s.subAgents, null, s.id))}
+      </div>`;
+    }}
+
+    <div class="transcript" ref=${(el: HTMLDivElement) => {
+      scroller = el;
+      // A freshly-mounted transcript (e.g. after switching sessions)
+      // starts pinned to the bottom.
+      setStickToBottom(true);
+      el.addEventListener("scroll", () => setStickToBottom(isAtBottom(el)));
+    }}>
+      ${() => {
+        const s = selected();
+        if (!s) return "";
+        return s.transcript.length === 0
+          ? html`<p class="empty">Waiting for the agent…</p>`
+          : s.transcript.map((e: TranscriptEntry) => html`<${Entry} e=${e} />`);
+      }}
+    </div>
+
+    <div class="composer"
+      onDragOver=${(e: DragEvent) => e.preventDefault()}
+      onDrop=${(e: DragEvent) => {
+        e.preventDefault();
+        if (e.dataTransfer?.files?.length) void picker.addFiles(e.dataTransfer.files);
+      }}>
+      ${AttachStrip(picker)}
+      <div class="composer-row">
+        ${AttachButton(picker)}
+        <textarea ref=${(el: HTMLTextAreaElement) => (composer = el)} rows="2"
+          placeholder=${() =>
+            selected()?.live
+              ? "Message this agent (⌘/Ctrl+Enter to send, paste/drop images)…"
+              : "Send to resume this conversation (⌘/Ctrl+Enter)…"}
+          onPaste=${(e: ClipboardEvent) => picker.addFromClipboard(e.clipboardData)}
+          onKeyDown=${onKey}></textarea>
+        <button class="primary" onClick=${sendMsg}>${() => (selected()?.live ? "send" : "resume")}</button>
+      </div>
+    </div>
+  `;
+
   return html`
     <main class="main">
       ${() => {
-        const s = selected();
-        if (!s) return html`<div class="placeholder">Select or launch an agent.</div>`;
-
-        // Focused sub-agent conversation, if one is selected and still present.
-        const sub = selectedSubKey()
-          ? s.subAgents.find((n) => n.key === selectedSubKey())
-          : undefined;
-        if (sub) return SubAgentDetail(sub, s);
-
-        return html`
-          <header class="conv-head">
-            <div>
-              <strong>${s.label}</strong>
-              <span class="badge ${s.status}">${STATUS_LABEL[s.status] ?? s.status}</span>
-              ${() => (!s.live ? html`<span class="badge dormant">dormant</span>` : "")}
-            </div>
-            <div class="head-actions">
-              ${() =>
-                s.live
-                  ? html`<button onClick=${() => actions.interrupt(s.id)} disabled=${() => !s.busy}>interrupt</button>
-                         <button onClick=${() => actions.close(s.id)}>close</button>`
-                  : ""}
-              <button class="danger"
-                onClick=${() => confirm(`Delete "${s.label}" permanently?`) && actions.remove(s.id)}>delete</button>
-            </div>
-          </header>
-
-          ${() => {
-            if (!s.subAgents.length) return "";
-            const pid = `subpanel:${s.id}`;
-            return html`<div class="subagents-panel">
-              <div class="panel-title clickable" onClick=${() => toggleCollapse(pid)}>
-                <span class="caret" classList=${() => ({ collapsed: isCollapsed(pid) })}>▾</span>
-                🌿 sub-agent tree (${s.subAgents.length}) —
-                ${() => (isCollapsed(pid) ? "click to expand" : "click a node to open it")}
-              </div>
-              ${() => (isCollapsed(pid) ? "" : SubTreeImpl(s.subAgents, null, s.id))}
-            </div>`;
-          }}
-
-          <div class="transcript" ref=${(el: HTMLDivElement) => {
-            scroller = el;
-            // A freshly-mounted transcript (e.g. after switching sessions)
-            // starts pinned to the bottom.
-            setStickToBottom(true);
-            el.addEventListener("scroll", () => setStickToBottom(isAtBottom(el)));
-          }}>
-            ${() =>
-              s.transcript.length === 0
-                ? html`<p class="empty">Waiting for the agent…</p>`
-                : s.transcript.map((e: TranscriptEntry) => html`<${Entry} e=${e} />`)}
-          </div>
-
-          <div class="composer"
-            onDragOver=${(e: DragEvent) => e.preventDefault()}
-            onDrop=${(e: DragEvent) => {
-              e.preventDefault();
-              if (e.dataTransfer?.files?.length) void picker.addFiles(e.dataTransfer.files);
-            }}>
-            ${AttachStrip(picker)}
-            <div class="composer-row">
-              ${AttachButton(picker)}
-              <textarea ref=${(el: HTMLTextAreaElement) => (composer = el)} rows="2"
-                placeholder=${() =>
-                  s.live
-                    ? "Message this agent (⌘/Ctrl+Enter to send, paste/drop images)…"
-                    : "Send to resume this conversation (⌘/Ctrl+Enter)…"}
-                onPaste=${(e: ClipboardEvent) => picker.addFromClipboard(e.clipboardData)}
-                onKeyDown=${onKey}></textarea>
-              <button class="primary" onClick=${sendMsg}>${() => (s.live ? "send" : "resume")}</button>
-            </div>
-          </div>
-        `;
+        const m = mode();
+        if (m === "none") return html`<div class="placeholder">Select or launch an agent.</div>`;
+        if (m === "sub") return SubAgentDetail(focusedSub, selected);
+        return conversation();
       }}
     </main>
   `;
